@@ -10,7 +10,12 @@
  */
 
 const HOST_ID = "__deeporax_agent_overlay__";
-const ACCENT = "#f97316";
+
+/** Brand tokens mirrored from deeporax.com: acid accent on greenish ink. */
+const ACCENT = "#b6e51f";
+const ACCENT_HOVER = "#c9ef4a";
+const INK = "#15170f";
+const PAPER = "#fdfcf7";
 
 /**
  * Brand link in the status pill. Tagged so visits originating from the
@@ -52,30 +57,29 @@ const CSS = `
   border: 2px solid ${ACCENT};
   border-radius: 4px;
   box-shadow:
-    inset 0 0 0 1px rgba(249, 115, 22, 0.22),
-    inset 0 0 18px rgba(249, 115, 22, 0.14);
-  animation: pulse 2.4s ease-in-out infinite;
+    inset 0 0 0 1px rgba(182, 229, 31, 0.22),
+    inset 0 0 18px rgba(182, 229, 31, 0.14);
+  animation: pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
   opacity: 0;
   transition: opacity 180ms ease;
 }
 .frame.on { opacity: 1; }
 @keyframes pulse {
   0%, 100% {
-    border-color: rgba(249, 115, 22, 0.85);
+    border-color: rgba(182, 229, 31, 0.9);
     box-shadow:
-      inset 0 0 0 1px rgba(249, 115, 22, 0.22),
-      inset 0 0 18px rgba(249, 115, 22, 0.12);
+      inset 0 0 0 1px rgba(182, 229, 31, 0.22),
+      inset 0 0 18px rgba(182, 229, 31, 0.12);
   }
   50% {
-    border-color: rgba(249, 115, 22, 0.42);
+    border-color: rgba(182, 229, 31, 0.45);
     box-shadow:
-      inset 0 0 0 1px rgba(249, 115, 22, 0.12),
-      inset 0 0 26px rgba(249, 115, 22, 0.22);
+      inset 0 0 0 1px rgba(182, 229, 31, 0.12),
+      inset 0 0 26px rgba(182, 229, 31, 0.22);
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .frame { animation: none; }
-  .dot { animation: none; }
   .ripple.go { animation: none; opacity: 0; }
 }
 .pill {
@@ -86,15 +90,12 @@ const CSS = `
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 6px 6px 6px 12px;
+  padding: 6px 6px 6px 10px;
   border-radius: 999px;
-  background: rgba(14, 15, 17, 0.94);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 8px 28px rgba(0, 0, 0, 0.42);
-  backdrop-filter: blur(10px) saturate(140%);
+  background: ${INK};
+  color: ${PAPER};
+  border: 1px solid rgba(253, 252, 247, 0.14);
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.55);
   opacity: 0;
   transition: opacity 180ms ease, transform 180ms ease;
   white-space: nowrap;
@@ -113,28 +114,14 @@ const CSS = `
   flex: none;
   text-decoration: none;
 }
-.brandlink:hover { color: #fdba74; text-decoration: underline; }
+.brandlink:hover { color: ${ACCENT_HOVER}; text-decoration: underline; }
 .divider {
   width: 1px;
   height: 13px;
-  background: rgba(255, 255, 255, 0.16);
+  background: rgba(253, 252, 247, 0.2);
   flex: none;
 }
 .pill.on { opacity: 1; transform: translateX(-50%) translateY(0); }
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: ${ACCENT};
-  box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.7);
-  animation: blip 1.4s ease-out infinite;
-  flex: none;
-}
-@keyframes blip {
-  0% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.65); }
-  70% { box-shadow: 0 0 0 9px rgba(249, 115, 22, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0); }
-}
 .label {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -149,13 +136,14 @@ const CSS = `
   border-radius: 999px;
   padding: 5px 13px;
   font: 600 12px/1 ui-sans-serif, system-ui, sans-serif;
-  color: #fff;
-  background: #dc2626;
+  color: ${INK};
+  background: ${ACCENT};
   flex: none;
-  transition: background 140ms ease;
+  transition: background 120ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-.stop:hover { background: #ef4444; }
-.stop:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.stop:hover { background: ${ACCENT_HOVER}; }
+.stop:focus-visible { outline: 2px solid ${PAPER}; outline-offset: 2px; }
+.mark { flex: none; display: block; }
 .cursor {
   position: absolute;
   top: 0;
@@ -180,6 +168,7 @@ const CSS = `
   border: 2px solid ${ACCENT};
   opacity: 0;
   will-change: transform, opacity;
+  box-sizing: border-box;
 }
 .ripple.go { animation: ring 520ms ease-out 1; }
 @keyframes ring {
@@ -191,7 +180,16 @@ const CSS = `
 const CURSOR_SVG = `
 <svg viewBox="0 0 24 24" width="22" height="22" xmlns="http://www.w3.org/2000/svg">
   <path d="M5 2.5 L5 19.2 L9.1 15.2 L11.7 21.4 L14.6 20.2 L12 14.1 L18 14.1 Z"
-        fill="#ffffff" stroke="${ACCENT}" stroke-width="1.6" stroke-linejoin="round"/>
+        fill="${ACCENT}" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>
+</svg>`;
+
+/** The Deeporax "Stack" mark, same geometry as deeporax.com and the popup. */
+const MARK_SVG = `
+<svg class="mark" width="15" height="15" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <rect x="3" y="3" width="42" height="42" rx="11" fill="${ACCENT}" stroke="${INK}" stroke-width="2.5"/>
+  <rect x="19" y="19" width="15" height="15" rx="4" fill="none" stroke="${INK}" stroke-width="2.4"/>
+  <rect x="13" y="13" width="17" height="17" rx="4.5" fill="${PAPER}" stroke="${INK}" stroke-width="2.7"/>
+  <polygon points="18.6,17 18.6,26 26,21.5" fill="${INK}"/>
 </svg>`;
 
 function ensure(): OverlayState {
@@ -217,8 +215,11 @@ function ensure(): OverlayState {
   const pill = document.createElement("div");
   pill.className = "pill";
 
-  const dot = document.createElement("div");
-  dot.className = "dot";
+  // The Stack mark replaces the generic status dot: it carries the same
+  // "something is live here" signal and identifies who is driving the tab.
+  const mark = document.createElement("span");
+  mark.innerHTML = MARK_SVG;
+  mark.style.cssText = "flex:none;display:flex;";
 
   const brand = document.createElement("a");
   brand.className = "brandlink";
@@ -252,7 +253,7 @@ function ensure(): OverlayState {
   const ripple = document.createElement("div");
   ripple.className = "ripple";
 
-  pill.append(dot, brand, divider, label, stopBtn);
+  pill.append(mark, brand, divider, label, stopBtn);
   wrap.append(frame, pill, ripple, cursor);
   root.append(style, wrap);
   (document.body || document.documentElement).appendChild(host);

@@ -592,7 +592,7 @@ export function handleDomMethod(
         el.setAttribute("data-deeporax-outline", el.style.outline || "");
         el.setAttribute("data-deeporax-outline-offset", el.style.outlineOffset || "");
       }
-      el.style.outline = String(params.style ?? "3px solid #f97316");
+      el.style.outline = String(params.style ?? "3px solid #b6e51f");
       el.style.outlineOffset = "2px";
       const ms = Number(params.durationMs ?? 2500);
       if (ms > 0) {

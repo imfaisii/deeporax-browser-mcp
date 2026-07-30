@@ -1,4 +1,4 @@
-import { openSite } from "./links";
+import { openRepo, openSite } from "./links";
 
 type Status = "connected" | "connecting" | "disconnected";
 
@@ -76,9 +76,7 @@ el("reconnect")?.addEventListener("click", async () => {
 
 el("brand")?.addEventListener("click", () => openSite("/", "popup_wordmark"));
 el("site")?.addEventListener("click", () => openSite("/", "popup_footer"));
-el("docs")?.addEventListener("click", () =>
-  openSite("/browser-mcp", "popup_setup_guide")
-);
+el("docs")?.addEventListener("click", () => openRepo());
 
 const version = el("version");
 if (version) version.textContent = `v${chrome.runtime.getManifest().version}`;

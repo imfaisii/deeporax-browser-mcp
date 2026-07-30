@@ -31,3 +31,11 @@ export function siteUrl(path: string, placement: string): string {
 export function openSite(path: string, placement: string): void {
   void chrome.tabs.create({ url: siteUrl(path, placement) });
 }
+
+/** Public source repository. Setup and troubleshooting docs live in its README. */
+export const REPO_URL = "https://github.com/imfaisii/deeporax-browser-mcp";
+
+/** Open the repository in a new tab. */
+export function openRepo(): void {
+  void chrome.tabs.create({ url: REPO_URL });
+}
