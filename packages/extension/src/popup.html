@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Deeporax Browser MCP</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #0f172a;
+        --card: #1e293b;
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --ok: #22c55e;
+        --bad: #ef4444;
+        --warn: #eab308;
+        --btn: #f97316;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --bg: #f8fafc;
+          --card: #ffffff;
+          --text: #0f172a;
+          --muted: #64748b;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        width: 300px;
+        padding: 14px;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 10px;
+        font-weight: 650;
+        letter-spacing: 0.01em;
+      }
+      .card {
+        background: var(--card);
+        border-radius: 10px;
+        padding: 12px;
+        border: 1px solid color-mix(in oklab, var(--muted) 30%, transparent);
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        margin: 6px 0;
+      }
+      .label { color: var(--muted); }
+      .value { font-weight: 600; text-align: right; word-break: break-all; }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 6px;
+        background: var(--bad);
+        vertical-align: middle;
+      }
+      .dot.ok { background: var(--ok); }
+      .dot.warn { background: var(--warn); }
+      button {
+        margin-top: 10px;
+        width: 100%;
+        border: 0;
+        border-radius: 8px;
+        padding: 8px 10px;
+        background: var(--btn);
+        color: white;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover { filter: brightness(1.08); }
+      p.help {
+        margin: 10px 0 0;
+        color: var(--muted);
+        font-size: 11px;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Deeporax Browser MCP</h1>
+    <div class="card">
+      <div class="row">
+        <span class="label">Bridge</span>
+        <span class="value"><span id="dot" class="dot"></span><span id="status">…</span></span>
+      </div>
+      <div class="row">
+        <span class="label">Endpoint</span>
+        <span class="value" id="url">—</span>
+      </div>
+    </div>
+    <button id="reconnect" type="button">Reconnect</button>
+    <p class="help">
+      Start the MCP server (<code>bun start</code>) so the extension can connect.
+      Then point Claude at this server.
+    </p>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,67 @@
+{
+  "name": "deeporax-browser-mcp",
+  "version": "0.1.0",
+  "description": "Deeporax Browser MCP: MCP server + Chrome extension bridge for real browser control (DOM snapshots, screenshots, clicks, console, network).",
+  "type": "module",
+  "license": "MIT",
+  "author": "Faisal Ashfaq <cfaysal099@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imfaisii/deeporax-browser-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/imfaisii/deeporax-browser-mcp/issues"
+  },
+  "homepage": "https://github.com/imfaisii/deeporax-browser-mcp#readme",
+  "keywords": [
+    "browser-mcp",
+    "deeporax",
+    "mcp",
+    "model-context-protocol",
+    "chrome",
+    "browser",
+    "browser-automation",
+    "extension",
+    "dom",
+    "screenshot",
+    "claude",
+    "ai-agent"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "deeporax-browser-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "extension",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/copy-extension.mjs",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "ws": "^8.18.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.2"
+  }
+}
