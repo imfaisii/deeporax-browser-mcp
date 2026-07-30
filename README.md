@@ -441,6 +441,43 @@ scripts cannot read it. Everything is `pointer-events: none` except the Stop but
 so it never blocks clicks, and animations are disabled under
 `prefers-reduced-motion`.
 
+## How the connection works
+
+There is no daemon and nothing to start by hand.
+
+```
+MCP client (Claude, Cursor, ...)
+   | spawns on demand, over stdio
+   v
+deeporax-browser-mcp            <- one process per MCP client
+   | WebSocket server on 127.0.0.1:17373
+   v
+Chrome extension                 <- connects out, retries every 2s
+```
+
+**Startup.** Your MCP client launches the server the first time a browser tool
+is called, or when the client starts. The server opens the bridge port. The
+extension is already retrying in the background, so it attaches within about
+two seconds.
+
+**Shutdown.** The server exits when its client exits: closing stdin, SIGINT,
+SIGTERM, and SIGHUP all shut it down and release the port. Nothing survives the
+session, so there is no process to clean up later.
+
+**Two clients at once.** Only one server can own the port. A second one asks the
+incumbent to hand over, and the incumbent closes its listener so the newcomer
+can bind. The extension reconnects to whoever owns the port. If the port is held
+by something that never yields, the new server gives up after 10 attempts and
+goes into standby: it stops retrying and its tools explain the conflict instead
+of burning a timer for the rest of the session.
+
+**If the extension shows a disconnected badge,** the server is simply not
+running yet. Ask your agent for `browser_status`, which starts it. The popup's
+Reconnect button forces a fresh attempt immediately.
+
+**Port.** Set `DEEPORAX_MCP_PORT` on the server if 17373 is taken. The extension
+currently expects 17373, so change both sides together.
+
 ## Temporary files
 
 Snapshots and screenshots are written under:

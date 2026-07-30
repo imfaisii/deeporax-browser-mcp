@@ -55,12 +55,25 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  const shutdown = () => {
+  let closing = false;
+  const shutdown = (why: string) => {
+    if (closing) return;
+    closing = true;
+    console.error(`[deeporax-browser-mcp] shutting down (${why})`);
     bridge.stop();
     process.exit(0);
   };
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+
+  process.on("SIGINT", () => shutdown("SIGINT"));
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGHUP", () => shutdown("SIGHUP"));
+
+  // An MCP host owns this process through stdio. When the host exits, stdin
+  // closes; without this the server would keep the bridge port and its memory
+  // for the rest of the login session.
+  process.stdin.on("close", () => shutdown("stdin closed"));
+  process.stdin.on("end", () => shutdown("stdin ended"));
+  process.stdin.on("error", () => shutdown("stdin error"));
 }
 
 main().catch((err) => {

@@ -15,8 +15,13 @@ type Pending = {
 };
 
 const REQUEST_TIMEOUT_MS = 30_000;
-/** How long to wait before retrying a bridge port held by a stale server. */
+/** How long to wait before retrying a bridge port held by another server. */
 const RETRY_BIND_MS = 2_000;
+/**
+ * Give up after this many attempts. A losing server must not spin forever: it
+ * would wake the CPU every couple of seconds for the life of the session.
+ */
+const MAX_BIND_ATTEMPTS = 10;
 
 export class ExtensionBridge {
   private wss: WebSocketServer | null = null;
@@ -25,6 +30,9 @@ export class ExtensionBridge {
   private connectedAt: number | null = null;
   private seq = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private bindAttempts = 0;
+  /** Set when we permanently lost the port to another live server. */
+  private standby = false;
 
   start(port = Number(process.env.DEEPORAX_MCP_PORT ?? DEFAULT_PORT)): void {
     if (this.wss) return;
@@ -32,6 +40,8 @@ export class ExtensionBridge {
     this.wss = new WebSocketServer({ host: "127.0.0.1", port });
 
     this.wss.on("listening", () => {
+      this.bindAttempts = 0;
+      this.standby = false;
       console.error(`[deeporax-browser-mcp] bridge listening on ws://127.0.0.1:${port}`);
     });
 
@@ -79,15 +89,27 @@ export class ExtensionBridge {
       if (err.code === "EADDRINUSE") {
         // A stale server from a previous session still owns the port. Keep
         // retrying so the extension can connect once that process exits.
-        console.error(
-          `[deeporax-browser-mcp] port ${port} busy, retrying in ${RETRY_BIND_MS}ms`
-        );
         try {
           this.wss?.close();
         } catch {
           /* ignore */
         }
         this.wss = null;
+        this.bindAttempts += 1;
+
+        if (this.bindAttempts > MAX_BIND_ATTEMPTS) {
+          this.standby = true;
+          console.error(
+            `[deeporax-browser-mcp] port ${port} is owned by another live server; ` +
+              "staying in standby. Tools will report the conflict instead of retrying."
+          );
+          return;
+        }
+
+        console.error(
+          `[deeporax-browser-mcp] port ${port} busy, retry ` +
+            `${this.bindAttempts}/${MAX_BIND_ATTEMPTS} in ${RETRY_BIND_MS}ms`
+        );
         this.askIncumbentToYield(port);
         if (!this.retryTimer) {
           this.retryTimer = setTimeout(() => {
@@ -152,6 +174,10 @@ export class ExtensionBridge {
   }
 
   stop(): void {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
     this.failAll("Bridge stopped");
     this.client?.close();
     this.client = null;
@@ -164,11 +190,19 @@ export class ExtensionBridge {
       connected: this.client?.readyState === 1,
       connectedAt: this.connectedAt,
       pendingRequests: this.pending.size,
+      standby: this.standby,
     };
   }
 
   async call(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
     if (!this.client || this.client.readyState !== 1) {
+      if (this.standby) {
+        throw new Error(
+          "Another deeporax-browser-mcp server already owns the bridge port. " +
+            "Close the other MCP client (or its stale process) and retry; this " +
+            "server is idle and will not fight for the port."
+        );
+      }
       throw new Error(loadExtensionHint());
     }
 
