@@ -31,7 +31,7 @@
     "node": ">=18"
   },
   "bin": {
-    "deeporax-browser-mcp": "./dist/index.js"
+    "deeporax-browser-mcp": "dist/index.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
