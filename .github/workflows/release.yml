@@ -1,16 +1,22 @@
 name: Release
 
+# Publishing is driven by the version in packages/mcp-server/package.json.
+# Push to main: if that version is not on npm yet, it is published, tagged, and
+# a GitHub Release is created. If it is already published, the job is a no-op,
+# so ordinary pushes cost nothing.
 on:
   push:
-    tags:
-      - "v*"
-  release:
-    types: [published]
+    branches: [main]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
   contents: write
   id-token: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -21,6 +27,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -33,70 +41,105 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Resolve version and decide whether to publish
+        id: check
+        run: |
+          VERSION=$(node -p "require('./packages/mcp-server/package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # A tag push must match the package version, otherwise the release
+          # would be labelled with a version nobody can install.
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            TAG="${GITHUB_REF_NAME#v}"
+            if [ "$TAG" != "$VERSION" ]; then
+              echo "Tag $GITHUB_REF_NAME does not match package version $VERSION"
+              exit 1
+            fi
+          fi
+
+          if npm view "deeporax-browser-mcp@$VERSION" version >/dev/null 2>&1; then
+            echo "deeporax-browser-mcp@$VERSION is already on npm, nothing to release"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deeporax-browser-mcp@$VERSION is new, will release"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install dependencies
+        if: steps.check.outputs.publish == 'true'
         run: bun install --frozen-lockfile
 
       - name: Build extension
+        if: steps.check.outputs.publish == 'true'
         run: bun run build:extension
 
       - name: Build server
+        if: steps.check.outputs.publish == 'true'
         run: bun run build:server
 
       - name: Typecheck
+        if: steps.check.outputs.publish == 'true'
         run: bun run typecheck
 
       - name: Smoke test
+        if: steps.check.outputs.publish == 'true'
         run: bun run smoke
 
-      - name: Check tag matches package version
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Check versions are in lockstep
+        if: steps.check.outputs.publish == 'true'
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          PKG=$(node -p "require('./packages/mcp-server/package.json').version")
-          if [ "$TAG" != "$PKG" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match package version $PKG"
-            exit 1
-          fi
-          echo "version $PKG"
+          V="${{ steps.check.outputs.version }}"
+          for f in package.json packages/extension/package.json packages/extension/public/manifest.json; do
+            FV=$(node -p "require('./$f').version")
+            if [ "$FV" != "$V" ]; then
+              echo "$f is $FV but the server package is $V. Run: bun run release <patch|minor|major>"
+              exit 1
+            fi
+          done
+          echo "all versions at $V"
 
       - name: Pack extension zip
+        if: steps.check.outputs.publish == 'true'
         run: |
           cd packages/extension/dist
           zip -r "${GITHUB_WORKSPACE}/extension-dist.zip" .
 
       - name: Publish to npm
+        if: steps.check.outputs.publish == 'true'
         working-directory: packages/mcp-server
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          if npm view "deeporax-browser-mcp@$VERSION" version >/dev/null 2>&1; then
-            echo "deeporax-browser-mcp@$VERSION is already published, skipping"
-            exit 0
-          fi
-          npm publish --access public
+        run: npm publish --access public
 
-      - name: Create GitHub Release with extension zip
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Tag the release commit
+        if: steps.check.outputs.publish == 'true' && github.ref_type == 'branch'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" extension-dist.zip --clobber
+          TAG="v${{ steps.check.outputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "$TAG already exists"
           else
-            gh release create "$GITHUB_REF_NAME" extension-dist.zip \
-              --title "$GITHUB_REF_NAME" \
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.check.outputs.version }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" extension-dist.zip --clobber
+          else
+            gh release create "$TAG" extension-dist.zip \
+              --title "$TAG" \
               --generate-notes
           fi
 
-      - name: Upload extension-dist.zip to an existing release
-        if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" extension-dist.zip --clobber
-
-      - name: Upload extension-dist.zip (workflow_dispatch artifact)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Upload extension-dist.zip (manual run)
+        if: steps.check.outputs.publish == 'true' && github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: extension-dist

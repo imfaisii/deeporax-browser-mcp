@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 /**
- * Bump every version in lockstep, commit, and tag.
+ * Bump every version in lockstep and commit.
  *
- *   bun run release patch      0.1.0 -> 0.1.1
- *   bun run release minor      0.1.0 -> 0.2.0
- *   bun run release major      0.1.0 -> 1.0.0
+ *   bun run release patch      0.1.1 -> 0.1.2
+ *   bun run release minor      0.1.1 -> 0.2.0
+ *   bun run release major      0.1.1 -> 1.0.0
  *   bun run release 0.4.2      explicit
  *
- * Pushing the tag is what triggers the npm publish, so this script stops
- * short of pushing and prints the command.
+ * Then `git push`. CI sees a version that is not on npm yet and publishes it,
+ * tags the commit, and creates the GitHub Release. No tagging happens here, so
+ * a tag can never point at a commit that was later amended.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
@@ -24,17 +25,10 @@ const FILES = [
   "packages/extension/public/manifest.json",
 ];
 
-function run(cmd) {
-  return execSync(cmd, { cwd: root, encoding: "utf8" }).trim();
-}
-
-function readJson(rel) {
-  return JSON.parse(readFileSync(join(root, rel), "utf8"));
-}
-
-function writeJson(rel, data) {
+const run = (cmd) => execSync(cmd, { cwd: root, encoding: "utf8" }).trim();
+const readJson = (rel) => JSON.parse(readFileSync(join(root, rel), "utf8"));
+const writeJson = (rel, data) =>
   writeFileSync(join(root, rel), JSON.stringify(data, null, 2) + "\n");
-}
 
 function nextVersion(current, arg) {
   if (/^\d+\.\d+\.\d+$/.test(arg)) return arg;
@@ -60,9 +54,15 @@ if (status) {
 const current = readJson("packages/mcp-server/package.json").version;
 const version = nextVersion(current, arg);
 
-if (run(`git tag -l v${version}`)) {
-  console.error(`Tag v${version} already exists.`);
+// npm versions are immutable, so catch a duplicate before building anything.
+try {
+  execSync(`npm view deeporax-browser-mcp@${version} version`, {
+    stdio: "ignore",
+  });
+  console.error(`deeporax-browser-mcp@${version} is already published.`);
   process.exit(1);
+} catch {
+  /* not published, good */
 }
 
 for (const rel of FILES) {
@@ -72,14 +72,13 @@ for (const rel of FILES) {
   console.log(`  ${rel} -> ${version}`);
 }
 
-// Rebuild so dist/ and the bundled extension carry the new version.
+console.log("\nbuilding...");
 run("bun run build");
 run("bun run typecheck");
 run("bun run smoke");
 
 run(`git add ${FILES.join(" ")}`);
 run(`git commit -m "Release v${version}"`);
-run(`git tag v${version}`);
 
-console.log(`\nReleased v${version} locally. Push to publish:\n`);
-console.log(`  git push origin main --follow-tags\n`);
+console.log(`\nCommitted v${version}. Publish with:\n`);
+console.log(`  git push\n`);

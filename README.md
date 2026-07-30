@@ -119,6 +119,26 @@ bun run smoke
 bun run pack:dry
 ```
 
+## Releasing
+
+Publishing is driven by the version in `packages/mcp-server/package.json`.
+
+```bash
+bun run release patch     # or minor / major / an explicit x.y.z
+git push
+```
+
+`release` bumps all four version files in lockstep (root, server, extension
+package, and the Chrome manifest), rebuilds, runs the checks, and commits.
+
+On push to `main`, CI compares the version against npm. If it is new, CI
+publishes the package, tags the commit `vX.Y.Z`, and creates a GitHub Release
+with `extension-dist.zip` attached. If the version is already published, the
+job exits immediately, so ordinary pushes cost nothing.
+
+Requires an `NPM_TOKEN` repository secret (granular token, read and write,
+bypass 2FA).
+
 ## Tools
 
 | Tool | Purpose |
