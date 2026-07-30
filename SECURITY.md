@@ -18,6 +18,16 @@ enable it for clients and configs you trust.
 |---------|-----------|
 | 0.1.x   | Yes       |
 
+## Outbound links
+
+The extension UI links to deeporax.com from the popup and the on-page status
+pill. Those links carry UTM parameters so the visit is attributable in web
+analytics.
+
+- Links open **only** when you click them. Nothing is sent in the background.
+- No identifier, page URL, or browsing data is attached.
+- The extension makes no network requests other than the local WebSocket bridge.
+
 ## Network exposure
 
 The WebSocket bridge binds to **127.0.0.1 only** by default. Do not reconfigure

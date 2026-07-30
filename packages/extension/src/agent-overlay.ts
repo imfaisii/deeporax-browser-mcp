@@ -12,6 +12,14 @@
 const HOST_ID = "__deeporax_agent_overlay__";
 const ACCENT = "#f97316";
 
+/**
+ * Brand link in the status pill. Tagged so visits originating from the
+ * on-page overlay are attributable, matching the popup's UTM scheme.
+ */
+const SITE_URL =
+  "https://deeporax.com/?utm_source=chrome_extension&utm_medium=extension" +
+  "&utm_campaign=browser_mcp&utm_content=overlay_pill";
+
 type OverlayState = {
   host: HTMLElement;
   root: ShadowRoot;
@@ -41,32 +49,34 @@ const CSS = `
 .frame {
   position: absolute;
   inset: 0;
-  border: 3px solid ${ACCENT};
-  border-radius: 6px;
+  border: 2px solid ${ACCENT};
+  border-radius: 4px;
   box-shadow:
-    inset 0 0 0 1px rgba(249, 115, 22, 0.35),
-    inset 0 0 22px rgba(249, 115, 22, 0.25),
-    0 0 18px rgba(249, 115, 22, 0.35);
-  animation: pulse 1.6s ease-in-out infinite;
+    inset 0 0 0 1px rgba(249, 115, 22, 0.22),
+    inset 0 0 18px rgba(249, 115, 22, 0.14);
+  animation: pulse 2.4s ease-in-out infinite;
   opacity: 0;
   transition: opacity 180ms ease;
 }
 .frame.on { opacity: 1; }
 @keyframes pulse {
   0%, 100% {
-    border-color: rgba(249, 115, 22, 0.95);
+    border-color: rgba(249, 115, 22, 0.85);
     box-shadow:
-      inset 0 0 0 1px rgba(249, 115, 22, 0.35),
-      inset 0 0 22px rgba(249, 115, 22, 0.22),
-      0 0 16px rgba(249, 115, 22, 0.30);
+      inset 0 0 0 1px rgba(249, 115, 22, 0.22),
+      inset 0 0 18px rgba(249, 115, 22, 0.12);
   }
   50% {
-    border-color: rgba(249, 115, 22, 0.45);
+    border-color: rgba(249, 115, 22, 0.42);
     box-shadow:
-      inset 0 0 0 1px rgba(249, 115, 22, 0.18),
-      inset 0 0 34px rgba(249, 115, 22, 0.34),
-      0 0 26px rgba(249, 115, 22, 0.5);
+      inset 0 0 0 1px rgba(249, 115, 22, 0.12),
+      inset 0 0 26px rgba(249, 115, 22, 0.22);
   }
+}
+@media (prefers-reduced-motion: reduce) {
+  .frame { animation: none; }
+  .dot { animation: none; }
+  .ripple.go { animation: none; opacity: 0; }
 }
 .pill {
   position: absolute;
@@ -75,18 +85,40 @@ const CSS = `
   transform: translateX(-50%) translateY(-14px);
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 8px 7px 12px;
+  gap: 9px;
+  padding: 6px 6px 6px 12px;
   border-radius: 999px;
-  background: rgba(17, 17, 19, 0.92);
+  background: rgba(14, 15, 17, 0.94);
   color: #fff;
-  border: 1px solid rgba(249, 115, 22, 0.55);
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 8px 28px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(10px) saturate(140%);
   opacity: 0;
   transition: opacity 180ms ease, transform 180ms ease;
   white-space: nowrap;
   max-width: 78vw;
+}
+.brandlink {
+  pointer-events: auto;
+  cursor: pointer;
+  border: 0;
+  background: none;
+  padding: 0 2px 0 0;
+  margin: 0;
+  font: 650 12.5px/1 ui-sans-serif, system-ui, sans-serif;
+  color: ${ACCENT};
+  letter-spacing: -0.005em;
+  flex: none;
+  text-decoration: none;
+}
+.brandlink:hover { color: #fdba74; text-decoration: underline; }
+.divider {
+  width: 1px;
+  height: 13px;
+  background: rgba(255, 255, 255, 0.16);
+  flex: none;
 }
 .pill.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 .dot {
@@ -115,13 +147,15 @@ const CSS = `
   cursor: pointer;
   border: 0;
   border-radius: 999px;
-  padding: 5px 12px;
+  padding: 5px 13px;
   font: 600 12px/1 ui-sans-serif, system-ui, sans-serif;
   color: #fff;
   background: #dc2626;
   flex: none;
+  transition: background 140ms ease;
 }
 .stop:hover { background: #ef4444; }
+.stop:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
 .cursor {
   position: absolute;
   top: 0;
@@ -186,9 +220,19 @@ function ensure(): OverlayState {
   const dot = document.createElement("div");
   dot.className = "dot";
 
+  const brand = document.createElement("a");
+  brand.className = "brandlink";
+  brand.textContent = "Deeporax";
+  brand.href = SITE_URL;
+  brand.target = "_blank";
+  brand.rel = "noopener noreferrer";
+
+  const divider = document.createElement("div");
+  divider.className = "divider";
+
   const label = document.createElement("div");
   label.className = "label";
-  label.innerHTML = "<b>Deeporax agent</b> <span>is controlling this tab</span>";
+  label.innerHTML = "<span>is controlling this tab</span>";
 
   const stopBtn = document.createElement("button");
   stopBtn.className = "stop";
@@ -208,7 +252,7 @@ function ensure(): OverlayState {
   const ripple = document.createElement("div");
   ripple.className = "ripple";
 
-  pill.append(dot, label, stopBtn);
+  pill.append(dot, brand, divider, label, stopBtn);
   wrap.append(frame, pill, ripple, cursor);
   root.append(style, wrap);
   (document.body || document.documentElement).appendChild(host);
@@ -219,7 +263,8 @@ function ensure(): OverlayState {
 
 function setLabel(action: string): void {
   const s = ensure();
-  s.label.innerHTML = `<b>Deeporax agent</b> <span>${escapeHtml(action)}</span>`;
+  // Only the action text changes; the brand link is a sibling node so it survives.
+  s.label.innerHTML = `<span>${escapeHtml(action)}</span>`;
 }
 
 function escapeHtml(v: string): string {

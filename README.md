@@ -6,17 +6,15 @@ Control a real Chrome browser from any MCP client: navigate, snapshot the DOM wi
 [![license](https://img.shields.io/npm/l/deeporax-browser-mcp.svg)](LICENSE)
 [![CI](https://github.com/imfaisii/deeporax-browser-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/imfaisii/deeporax-browser-mcp/actions/workflows/ci.yml)
 
-Unlike headless automation, this drives **your** browser: your profile, your logins, your session. The agent works inside the tabs you already have open, and an on-page overlay shows what it is doing with a Stop button.
+Headless tools launch a throwaway browser. This one drives **the browser you are already using**, with your profile, your logins, and your open tabs. An on-page overlay shows what the agent is doing and lets you stop it at any moment.
 
-## Demo
-
-After install, try a prompt like:
+Once installed, prompts like this just work:
 
 > use deeporax browser mcp to create the google ads campaign for this project
 
-The agent opens your Chrome, reads the page structure, and drives the UI while you watch.
+The agent opens your Chrome, reads the page structure, and clicks through the UI while you watch.
 
-## Architecture
+## How it works
 
 ```
 AI client (Claude Code, Cursor, VS Code, ...)
@@ -31,7 +29,16 @@ AI client (Claude Code, Cursor, VS Code, ...)
   Your Chrome tabs (DOM + screenshots)
 ```
 
-Install has two parts: **the MCP server** ([step A](#a-install-the-mcp-server)) and **the Chrome extension** ([step B](#b-install-the-chrome-extension)). Both are required.
+Your AI client starts the server automatically when a chat session opens, so **you never run it yourself**. The extension connects to it over localhost.
+
+## Install
+
+Two parts, both required:
+
+1. **[The MCP server](#a-install-the-mcp-server)** — one line for your AI client
+2. **[The Chrome extension](#b-install-the-chrome-extension)** — load unpacked, once
+
+Takes about two minutes.
 
 ## A. Install the MCP server
 
@@ -297,61 +304,93 @@ You should see `connected: true` and a DOM snapshot with refs like `e1`, `e2`.
 
 ## Tools
 
+32 tools, grouped by what you reach for.
+
+**See the page**
+
 | Tool | Purpose |
 |------|---------|
-| `browser_status` | Extension connection + active tab |
-| `browser_navigate` | Go to URL (optionally new tab) |
-| `browser_tabs` | list / new / close / select |
-| `browser_snapshot` | Accessibility-style DOM with refs `e1`, `e2`, … (also under `/tmp/deeporax-browser-mcp/snapshots`) |
-| `browser_screenshot` | PNG of visible viewport (also under `/tmp/deeporax-browser-mcp/screenshots`) |
-| `browser_clear_tmp` | Delete one file or wipe `/tmp/deeporax-browser-mcp` artifacts |
-| `browser_find` | Search snapshot/page by text or regex (returns refs) |
+| `browser_snapshot` | Accessibility-style DOM with refs `e1`, `e2`, … Start here |
+| `browser_screenshot` | PNG of the visible viewport |
+| `browser_find` | Search the page by text or regex, returns refs |
+| `browser_get_text` / `browser_get_html` | Read raw content |
+| `browser_get_bounding_box` | Element box in CSS pixels |
+
+**Act on it**
+
+| Tool | Purpose |
+|------|---------|
 | `browser_click` | Click by `ref` or CSS `selector` |
 | `browser_click_xy` | Click at viewport coordinates (computer-use style) |
-| `browser_type` | Type into inputs |
-| `browser_press_key` | Key / chord |
-| `browser_hover` | Hover |
-| `browser_drag` | Drag from one element to another |
-| `browser_select_option` | `<select>` values |
-| `browser_scroll` | Scroll page or into view |
-| `browser_wait` | time / text / selector |
-| `browser_evaluate` | Run JS in the page |
-| `browser_get_text` / `browser_get_html` | Read content |
-| `browser_get_bounding_box` | Element box in CSS pixels |
-| `browser_fill_form` | Multi-field fill |
+| `browser_type` | Type into an input, optionally submit |
+| `browser_fill_form` | Fill many fields in one call |
+| `browser_press_key` | Key or chord, e.g. `Control+a` |
+| `browser_hover` | Hover an element |
+| `browser_drag` | Drag one element onto another |
+| `browser_select_option` | Choose `<select>` values |
+| `browser_scroll` | Scroll the page or an element into view |
 | `browser_file_upload` | Set files on `<input type=file>` (base64) |
-| `browser_highlight` | Outline target element for humans |
-| `browser_console` | Read console log/warn/error (filterable) |
-| `browser_network` | List recent network requests |
-| `browser_handle_dialog` | Pre-set alert/confirm/prompt behavior |
+
+**Move around**
+
+| Tool | Purpose |
+|------|---------|
+| `browser_navigate` | Go to a URL, optionally in a new tab |
+| `browser_tabs` | list / new / close / select |
+| `browser_back` / `browser_forward` / `browser_reload` | History |
+| `browser_wait` | Wait for time, text, or a selector |
 | `browser_resize` | Resize the browser window |
-| `browser_batch` | Run multiple actions in one round-trip |
-| `browser_overlay` | Show/hide the agent-control overlay, or resume after Stop |
-| `browser_back` / `forward` / `reload` | History |
 
-**Agent loop that works well:**
+**Debug**
 
-1. `browser_navigate` or `browser_tabs`
-2. `browser_snapshot`
-3. `browser_click` / `browser_type` using refs from the snapshot
-4. Snapshot again (refs go stale after navigation)
+| Tool | Purpose |
+|------|---------|
+| `browser_console` | Read console log/warn/error, filterable by regex |
+| `browser_network` | List recent network requests |
+| `browser_evaluate` | Run JavaScript in the page |
+| `browser_handle_dialog` | Decide alert/confirm/prompt behavior up front |
+
+**Session**
+
+| Tool | Purpose |
+|------|---------|
+| `browser_status` | Extension connection and active tab |
+| `browser_overlay` | Show/hide the overlay, or resume after a user pressed Stop |
+| `browser_highlight` | Outline an element so a human can see it |
+| `browser_batch` | Run several actions in one round-trip |
+| `browser_clear_tmp` | Delete saved snapshots and screenshots |
+
+### The loop that works
+
+```
+browser_navigate  →  browser_snapshot  →  browser_click / browser_type  →  browser_snapshot
+```
+
+Snapshots hand back refs like `e1`, `e2`. Use those instead of CSS selectors when
+you can: they survive markup churn better and are what the click and type tools
+expect. **Refs go stale after navigation**, so snapshot again after the page
+changes.
 
 ## Agent control overlay
 
-While the agent acts on a tab, the extension shows a visible control layer so a human
-can follow along and intervene:
+You can always see when an agent is driving a tab, and stop it.
 
 - A pulsing orange border around the viewport
-- A status pill: **Deeporax agent** — *clicking link "Sign in"*
+- A status pill naming the current action: **Deeporax** — *clicking link "Sign in"*
 - A **Stop** button that halts agent control for that tab
-- A synthetic cursor that glides to each target and pulses before the click fires
+- A cursor that glides to each target and pulses right before the click fires
 
-The overlay renders in a closed shadow root and is `pointer-events: none` except the
-Stop button, so it cannot interfere with the page. It respects `prefers-reduced-motion`.
+The pill appears automatically during any action and hides after 15 seconds of
+inactivity.
 
-After a user presses Stop, further actions in that tab fail until you call
-`browser_overlay` with `action: "resume"`. Pass `overlay: false` on an individual
-action to skip the visuals.
+**Stop** is a hard stop. Every later action in that tab returns an error until you
+call `browser_overlay` with `action: "resume"`. To run one action without the
+visuals, pass `overlay: false` to it.
+
+The overlay lives in a closed shadow root, so page CSS cannot restyle it and page
+scripts cannot read it. Everything is `pointer-events: none` except the Stop button,
+so it never blocks clicks, and animations are disabled under
+`prefers-reduced-motion`.
 
 ## Temporary files
 

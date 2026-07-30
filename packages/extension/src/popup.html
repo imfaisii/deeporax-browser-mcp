@@ -5,105 +5,425 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Deeporax Browser MCP</title>
     <style>
+      /*
+        One accent (#f97316) carried over from the agent overlay so the popup and
+        the on-page layer read as one product. One radius scale: 999px for
+        interactive pills, 12px for panels, 8px for inline chips.
+      */
       :root {
         color-scheme: light dark;
-        --bg: #0f172a;
-        --card: #1e293b;
-        --text: #e2e8f0;
-        --muted: #94a3b8;
-        --ok: #22c55e;
-        --bad: #ef4444;
-        --warn: #eab308;
-        --btn: #f97316;
+
+        --bg: #ffffff;
+        --bg-sunk: #f6f7f9;
+        --panel: #ffffff;
+        --line: #e4e7ec;
+        --line-strong: #d3d8e0;
+
+        --text: #14161a;
+        --text-dim: #5b6270;
+        --text-faint: #858c99;
+
+        /* --accent is the brand orange for surfaces and marks.
+           --accent-solid is darkened so white button text clears WCAG AA (3:1). */
+        --accent: #f97316;
+        --accent-solid: #d95c02;
+        --accent-ink: #9a3d02;
+        --accent-wash: #fff3e9;
+
+        --live: #12833c;
+        --live-wash: #e8f6ed;
+        --idle: #64748b;
+        --idle-wash: #eef0f3;
+        --wait: #b45309;
+        --wait-wash: #fdf3e3;
+
+        --shadow: 0 1px 2px rgba(16, 18, 22, 0.06),
+          0 8px 24px -12px rgba(16, 18, 22, 0.18);
       }
-      @media (prefers-color-scheme: light) {
+
+      @media (prefers-color-scheme: dark) {
         :root {
-          --bg: #f8fafc;
-          --card: #ffffff;
-          --text: #0f172a;
-          --muted: #64748b;
+          --bg: #101215;
+          --bg-sunk: #0b0d10;
+          --panel: #16191d;
+          --line: #262b31;
+          --line-strong: #333941;
+
+          --text: #f2f4f7;
+          --text-dim: #a6adb9;
+          --text-faint: #79818e;
+
+          --accent: #fb923c;
+          --accent-solid: #fb923c;
+          --accent-ink: #fdba74;
+          --accent-wash: #2a1a0d;
+
+          --live: #4ade80;
+          --live-wash: #10241a;
+          --idle: #94a3b8;
+          --idle-wash: #1c2127;
+          --wait: #fbbf24;
+          --wait-wash: #2a2110;
+
+          --shadow: 0 1px 2px rgba(0, 0, 0, 0.5),
+            0 10px 30px -14px rgba(0, 0, 0, 0.7);
         }
       }
-      * { box-sizing: border-box; }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
+        width: 320px;
         margin: 0;
-        font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+        padding: 0;
         background: var(--bg);
         color: var(--text);
-        width: 300px;
-        padding: 14px;
+        font: 400 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+          Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
       }
-      h1 {
-        font-size: 14px;
-        margin: 0 0 10px;
-        font-weight: 650;
-        letter-spacing: 0.01em;
-      }
-      .card {
-        background: var(--card);
-        border-radius: 10px;
-        padding: 12px;
-        border: 1px solid color-mix(in oklab, var(--muted) 30%, transparent);
-      }
-      .row {
+
+      /* ---------- header ---------- */
+
+      header {
         display: flex;
-        justify-content: space-between;
-        gap: 8px;
-        margin: 6px 0;
+        align-items: center;
+        gap: 9px;
+        padding: 13px 16px;
+        border-bottom: 1px solid var(--line);
       }
-      .label { color: var(--muted); }
-      .value { font-weight: 600; text-align: right; word-break: break-all; }
-      .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        display: inline-block;
-        margin-right: 6px;
-        background: var(--bad);
-        vertical-align: middle;
+
+      .mark {
+        width: 22px;
+        height: 22px;
+        flex: none;
+        border-radius: 7px;
+        background: var(--accent);
+        display: grid;
+        place-items: center;
+        color: #fff;
       }
-      .dot.ok { background: var(--ok); }
-      .dot.warn { background: var(--warn); }
-      button {
-        margin-top: 10px;
-        width: 100%;
+
+      .wordmark {
+        display: flex;
+        align-items: baseline;
+        gap: 5px;
+        min-width: 0;
+        background: none;
         border: 0;
+        padding: 2px 4px;
+        margin: -2px -4px;
         border-radius: 8px;
-        padding: 8px 10px;
-        background: var(--btn);
-        color: white;
-        font-weight: 600;
+        font: inherit;
+        color: inherit;
         cursor: pointer;
+        text-align: left;
       }
-      button:hover { filter: brightness(1.08); }
-      p.help {
-        margin: 10px 0 0;
-        color: var(--muted);
+      .wordmark:hover .brand {
+        color: var(--accent-ink);
+      }
+      .wordmark:hover .sub {
+        color: var(--text-dim);
+      }
+
+      .brand {
+        font-size: 13px;
+        font-weight: 640;
+        letter-spacing: -0.006em;
+        white-space: nowrap;
+        transition: color 140ms ease;
+      }
+
+      .sub {
         font-size: 11px;
+        color: var(--text-faint);
+        white-space: nowrap;
+        transition: color 140ms ease;
       }
-      code {
+
+      /* ---------- status ---------- */
+
+      main {
+        padding: 14px 16px 16px;
+      }
+
+      .status {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 12px 13px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .beacon {
+        width: 30px;
+        height: 30px;
+        flex: none;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        background: var(--idle-wash);
+        color: var(--idle);
+        transition: background 200ms ease, color 200ms ease;
+      }
+      .beacon svg {
+        width: 15px;
+        height: 15px;
+      }
+
+      [data-state="connected"] .beacon {
+        background: var(--live-wash);
+        color: var(--live);
+      }
+      [data-state="connecting"] .beacon {
+        background: var(--wait-wash);
+        color: var(--wait);
+      }
+
+      .status-copy {
+        min-width: 0;
+        flex: 1;
+      }
+
+      .headline {
+        font-size: 13px;
+        font-weight: 620;
+        letter-spacing: -0.004em;
+      }
+
+      .detail {
+        margin-top: 1px;
+        font-size: 11.5px;
+        color: var(--text-dim);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .endpoint {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 11px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Breathing ring while the bridge is negotiating. */
+      .pulse {
+        position: relative;
+      }
+      [data-state="connecting"] .pulse::after {
+        content: "";
+        position: absolute;
+        inset: -3px;
+        border-radius: 50%;
+        border: 2px solid var(--wait);
+        opacity: 0;
+        animation: ring 1.5s ease-out infinite;
+      }
+      @keyframes ring {
+        0% {
+          opacity: 0.55;
+          transform: scale(0.85);
+        }
+        100% {
+          opacity: 0;
+          transform: scale(1.35);
+        }
+      }
+
+      /* ---------- actions ---------- */
+
+      .actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      button.act {
+        flex: 1;
+        border-radius: 999px;
+        padding: 8px 12px;
+        font: 600 12.5px/1 ui-sans-serif, system-ui, sans-serif;
+        cursor: pointer;
+        border: 1px solid transparent;
+        transition: background 140ms ease, border-color 140ms ease,
+          transform 100ms ease;
+      }
+      button.act:active {
+        transform: translateY(1px);
+      }
+      button.act:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+
+      .primary {
+        background: var(--accent-solid);
+        color: #ffffff;
+      }
+      .primary:hover {
+        background: #c25102;
+      }
+      @media (prefers-color-scheme: dark) {
+        .primary {
+          /* Dark-mode accent is light, so ink must flip to stay AA-readable. */
+          color: #22120a;
+        }
+        .primary:hover {
+          background: #fda766;
+        }
+      }
+
+      .ghost {
+        background: transparent;
+        color: var(--text-dim);
+        border-color: var(--line-strong);
+      }
+      .ghost:hover {
+        background: var(--bg-sunk);
+        color: var(--text);
+      }
+
+      /* ---------- help ---------- */
+
+      .help {
+        margin: 12px 0 0;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: var(--bg-sunk);
+        border: 1px solid var(--line);
+        font-size: 11.5px;
+        color: var(--text-dim);
+      }
+      .help p {
+        margin: 0;
+      }
+      .help code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+        padding: 1px 5px;
+        border-radius: 5px;
+        background: var(--accent-wash);
+        color: var(--accent-ink);
+      }
+
+      /* ---------- footer ---------- */
+
+      footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 10px 16px;
+        border-top: 1px solid var(--line);
+        background: var(--bg-sunk);
+      }
+
+      .link {
+        background: none;
+        border: 0;
+        padding: 3px 5px;
+        margin: -3px -5px;
+        border-radius: 7px;
+        font: 500 11.5px/1 ui-sans-serif, system-ui, sans-serif;
+        color: var(--text-dim);
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition: color 140ms ease;
+      }
+      .link:hover {
+        color: var(--accent-ink);
+      }
+      .link:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+      .link svg {
+        width: 11px;
+        height: 11px;
+        opacity: 0.75;
+      }
+
+      .version {
+        font-size: 11px;
+        color: var(--text-faint);
+        font-variant-numeric: tabular-nums;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+        }
       }
     </style>
   </head>
-  <body>
-    <h1>Deeporax Browser MCP</h1>
-    <div class="card">
-      <div class="row">
-        <span class="label">Bridge</span>
-        <span class="value"><span id="dot" class="dot"></span><span id="status">…</span></span>
+  <body data-state="disconnected">
+    <header>
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none"
+          stroke="currentColor" stroke-width="2.4" stroke-linecap="round"
+          stroke-linejoin="round">
+          <path d="M4 7h16M4 12h10M4 17h7" />
+        </svg>
+      </span>
+      <button class="wordmark" id="brand" type="button"
+        title="Open deeporax.com">
+        <span class="brand">Deeporax</span>
+        <span class="sub">Browser MCP</span>
+      </button>
+    </header>
+
+    <main>
+      <section class="status" aria-live="polite">
+        <span class="beacon pulse" id="beacon" aria-hidden="true">
+          <svg id="beacon-icon" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+            <line x1="12" y1="2" x2="12" y2="12" />
+          </svg>
+        </span>
+        <span class="status-copy">
+          <span class="headline" id="headline">Checking…</span>
+          <span class="detail" id="detail">Looking for the MCP server</span>
+        </span>
+      </section>
+
+      <div class="actions">
+        <button class="act primary" id="reconnect" type="button">
+          Reconnect
+        </button>
+        <button class="act ghost" id="docs" type="button">Setup guide</button>
       </div>
-      <div class="row">
-        <span class="label">Endpoint</span>
-        <span class="value" id="url">—</span>
+
+      <div class="help" id="help">
+        <p id="help-text">
+          Start the server with <code>npx deeporax-browser-mcp</code>, then keep
+          this window open.
+        </p>
       </div>
-    </div>
-    <button id="reconnect" type="button">Reconnect</button>
-    <p class="help">
-      Start the MCP server (<code>bun start</code>) so the extension can connect.
-      Then point Claude at this server.
-    </p>
+    </main>
+
+    <footer>
+      <button class="link" id="site" type="button">
+        deeporax.com
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"
+          aria-hidden="true">
+          <path d="M7 17 17 7M9 7h8v8" />
+        </svg>
+      </button>
+      <span class="version" id="version">v0.1.0</span>
+    </footer>
+
     <script src="popup.js"></script>
   </body>
 </html>
