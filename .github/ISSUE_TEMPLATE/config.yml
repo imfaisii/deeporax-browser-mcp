@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/imfaisii/deeporax-browser-mcp/blob/main/SECURITY.md
+    about: Report security issues privately by email (do not open a public issue).
+  - name: Questions and discussion
+    url: https://github.com/imfaisii/deeporax-browser-mcp/discussions
+    about: Ask usage questions and share ideas.

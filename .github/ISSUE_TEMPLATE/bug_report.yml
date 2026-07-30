@@ -1,0 +1,90 @@
+name: Bug report
+description: Something is broken in the server or extension
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. **Security issues** go to email (see [SECURITY.md](https://github.com/imfaisii/deeporax-browser-mcp/blob/main/SECURITY.md)), not here.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Clear description of the bug.
+      placeholder: When I call browser_snapshot...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: macOS 15 / Windows 11 / Ubuntu 24.04
+    validations:
+      required: true
+  - type: input
+    id: chrome
+    attributes:
+      label: Chrome version
+      placeholder: "131.0.xxxx"
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Node / Bun version
+      placeholder: node 22 / bun 1.3
+    validations:
+      required: true
+  - type: input
+    id: package-version
+    attributes:
+      label: deeporax-browser-mcp version
+      placeholder: 0.1.0 / git main @ abc1234
+    validations:
+      required: false
+  - type: dropdown
+    id: badge
+    attributes:
+      label: Extension badge shows ON?
+      options:
+        - "Yes"
+        - "No"
+        - "Not sure"
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install?
+      options:
+        - npm global (deeporax-browser-mcp)
+        - npx
+        - From this monorepo (bun)
+        - Other
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / error text
+      description: Paste stderr from the MCP server, extension service worker console, or tool response.
+      render: shell
+    validations:
+      required: false
