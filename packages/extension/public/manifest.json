@@ -39,8 +39,6 @@
     "scripting",
     "activeTab",
     "alarms",
-    "webNavigation",
-    "storage",
     "debugger"
   ],
   "host_permissions": [
