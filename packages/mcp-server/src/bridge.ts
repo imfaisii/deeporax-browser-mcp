@@ -1,8 +1,9 @@
-import { WebSocketServer, type WebSocket } from "ws";
+import { WebSocketServer, WebSocket as WsClient, type WebSocket } from "ws";
 import {
   DEFAULT_PORT,
   isHello,
   isResponse,
+  isYield,
   type BridgeRequest,
 } from "./protocol.js";
 import { loadExtensionHint } from "./paths.js";
@@ -87,6 +88,7 @@ export class ExtensionBridge {
           /* ignore */
         }
         this.wss = null;
+        this.askIncumbentToYield(port);
         if (!this.retryTimer) {
           this.retryTimer = setTimeout(() => {
             this.retryTimer = null;
@@ -97,6 +99,56 @@ export class ExtensionBridge {
       }
       console.error("[deeporax-browser-mcp] bridge error:", err.message);
     });
+  }
+
+  /**
+   * Close our listener so a newer server can bind. Any connected extension is
+   * dropped; it reconnects to whoever owns the port next.
+   */
+  private releaseForTakeover(): void {
+    this.failAll("Bridge handed over to a newer server");
+    try {
+      this.client?.close(4001, "server handover");
+    } catch {
+      /* ignore */
+    }
+    this.client = null;
+    this.connectedAt = null;
+    try {
+      this.wss?.close();
+    } catch {
+      /* ignore */
+    }
+    this.wss = null;
+  }
+
+  /**
+   * Ask whoever holds the port to step aside. Harmless if the socket belongs to
+   * something else entirely: it just receives a message it ignores.
+   */
+  private askIncumbentToYield(port: number): void {
+    let sock: WsClient;
+    try {
+      sock = new WsClient(`ws://127.0.0.1:${port}`);
+    } catch {
+      return;
+    }
+    const done = () => {
+      try {
+        sock.close();
+      } catch {
+        /* ignore */
+      }
+    };
+    sock.on("open", () => {
+      try {
+        sock.send(JSON.stringify({ type: "yield", pid: process.pid }));
+      } catch {
+        /* ignore */
+      }
+      setTimeout(done, 200);
+    });
+    sock.on("error", done);
   }
 
   stop(): void {
@@ -147,6 +199,14 @@ export class ExtensionBridge {
       msg = JSON.parse(raw);
     } catch {
       console.error("[deeporax-browser-mcp] invalid JSON from extension");
+      return;
+    }
+
+    if (isYield(msg)) {
+      console.error(
+        `[deeporax-browser-mcp] newer server (pid ${msg.pid}) requested the port; releasing it`
+      );
+      this.releaseForTakeover();
       return;
     }
 

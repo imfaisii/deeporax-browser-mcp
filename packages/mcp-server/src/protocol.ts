@@ -32,12 +32,20 @@ export type HelloMessage = {
 export type PingMessage = { type: "ping" };
 export type PongMessage = { type: "pong" };
 
+/**
+ * Sent by a newly started server to whoever currently owns the bridge port.
+ * The old server shuts its listener down so the new one can take over. This
+ * keeps a single MCP host in control when an earlier process was orphaned.
+ */
+export type YieldMessage = { type: "yield"; pid: number };
+
 export type BridgeMessage =
   | BridgeRequest
   | BridgeResponse
   | HelloMessage
   | PingMessage
-  | PongMessage;
+  | PongMessage
+  | YieldMessage;
 
 export function isRequest(msg: unknown): msg is BridgeRequest {
   return (
@@ -57,6 +65,14 @@ export function isResponse(msg: unknown): msg is BridgeResponse {
     "id" in msg &&
     "ok" in msg &&
     typeof (msg as BridgeResponse).ok === "boolean"
+  );
+}
+
+export function isYield(msg: unknown): msg is YieldMessage {
+  return (
+    typeof msg === "object" &&
+    msg !== null &&
+    (msg as YieldMessage).type === "yield"
   );
 }
 
