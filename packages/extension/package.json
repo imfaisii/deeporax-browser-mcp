@@ -1,0 +1,15 @@
+{
+  "name": "@deeporax/browser-mcp-extension",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun run scripts/build.ts",
+    "typecheck": "tsc --noEmit",
+    "watch": "bun run scripts/build.ts --watch"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.1",
+    "typescript": "^5.9.2"
+  }
+}

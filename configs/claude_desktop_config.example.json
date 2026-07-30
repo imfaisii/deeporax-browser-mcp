@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "deeporax-browser-mcp": {
+      "command": "npx",
+      "args": ["-y", "deeporax-browser-mcp"],
+      "env": {
+        "DEEPORAX_MCP_PORT": "17373"
+      }
+    }
+  }
+}

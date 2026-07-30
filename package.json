@@ -1,0 +1,24 @@
+{
+  "name": "deeporax-browser-mcp-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Monorepo for deeporax-browser-mcp: Chrome extension + MCP server for AI browser control",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "bun run build:extension && bun run build:server",
+    "build:extension": "bun run --filter @deeporax/browser-mcp-extension build",
+    "build:server": "bun run --filter deeporax-browser-mcp build",
+    "typecheck": "bun run --filter '*' typecheck",
+    "start": "bun run --filter deeporax-browser-mcp start",
+    "smoke": "bun run packages/mcp-server/scripts/list-tools.ts",
+    "pack:dry": "bun run build && cd packages/mcp-server && npm pack --dry-run"
+  },
+  "devDependencies": {
+    "bun-types": "^1.3.14"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
