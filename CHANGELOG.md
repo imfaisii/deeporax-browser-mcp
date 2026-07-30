@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-07-30
+## [0.1.0] - 2026-07-31
 
 Initial public release.
 
@@ -15,9 +15,17 @@ Initial public release.
 
 - MCP server (`deeporax-browser-mcp`) with stdio transport for Claude Code / Claude Desktop
 - Chrome MV3 extension with WebSocket bridge on `127.0.0.1:17373`
-- Browser tools: navigate, tabs, snapshot, screenshot, click, type, press_key, hover, select_option, scroll, wait, evaluate, get_text, get_html, fill_form, back, forward, reload, status
+- 32 browser tools: navigate, tabs, snapshot, screenshot, click, click_xy, type,
+  press_key, hover, drag, select_option, scroll, wait, evaluate, find, get_text,
+  get_html, get_bounding_box, fill_form, file_upload, highlight, console, network,
+  handle_dialog, resize, batch, overlay, clear_tmp, back, forward, reload, status
 - Accessibility-style DOM snapshots with stable element refs (`e1`, `e2`, ...)
 - Viewport PNG screenshots via `captureVisibleTab`
+- Agent control overlay: pulsing orange border, status pill with a Stop button, and a
+  synthetic cursor that animates to each target before the click fires
+- Console and network capture per tab, with regex filtering
+- Snapshots and screenshots written to `/tmp/deeporax-browser-mcp`, auto-pruned after
+  30 minutes and capped at 40 files per kind
 - npm-publishable package that bundles the unpacked extension
 - Example MCP host configs under `configs/`
 - CI workflow (typecheck, smoke, pack dry-run)

@@ -55,10 +55,6 @@ Full documentation, tools list, security notes, and source install:
 
 https://github.com/imfaisii/deeporax-browser-mcp
 
-## Name note
-
-Unrelated to the existing npm package `deeporax-browser-mcp` (macOS DevTools/CDP). This package uses an extension bridge and works on any OS.
-
 ## License
 
 MIT
