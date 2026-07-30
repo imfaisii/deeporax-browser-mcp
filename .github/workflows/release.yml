@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  push:
+    tags:
+      - "v*"
   release:
     types: [published]
   workflow_dispatch:
@@ -45,6 +48,17 @@ jobs:
       - name: Smoke test
         run: bun run smoke
 
+      - name: Check tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./packages/mcp-server/package.json').version")
+          if [ "$TAG" != "$PKG" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version $PKG"
+            exit 1
+          fi
+          echo "version $PKG"
+
       - name: Pack extension zip
         run: |
           cd packages/extension/dist
@@ -54,9 +68,28 @@ jobs:
         working-directory: packages/mcp-server
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --access public
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "deeporax-browser-mcp@$VERSION" version >/dev/null 2>&1; then
+            echo "deeporax-browser-mcp@$VERSION is already published, skipping"
+            exit 0
+          fi
+          npm publish --access public
 
-      - name: Upload extension-dist.zip to GitHub Release
+      - name: Create GitHub Release with extension zip
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" extension-dist.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" extension-dist.zip \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+
+      - name: Upload extension-dist.zip to an existing release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
