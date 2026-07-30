@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { bridge } from "./bridge.js";
 import { deleteArtifact, saveScreenshot, saveSnapshot, TMP_ROOT } from "./tmp-store.js";
+import { extensionPath, loadExtensionHint } from "./paths.js";
 
 type ContentItem =
   | { type: "text"; text: string }
@@ -53,8 +54,8 @@ export function registerTools(server: McpServer): void {
         if (!status.connected) {
           return textResult({
             connected: false,
-            message:
-              "Extension not connected. Load packages/extension/dist as an unpacked extension and keep Chrome open.",
+            extensionPath: extensionPath(),
+            message: loadExtensionHint(),
           });
         }
         const tab = await call("active_tab");

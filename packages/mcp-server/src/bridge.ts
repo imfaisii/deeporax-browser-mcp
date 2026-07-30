@@ -5,6 +5,7 @@ import {
   isResponse,
   type BridgeRequest,
 } from "./protocol.js";
+import { loadExtensionHint } from "./paths.js";
 
 type Pending = {
   resolve: (value: unknown) => void;
@@ -13,6 +14,8 @@ type Pending = {
 };
 
 const REQUEST_TIMEOUT_MS = 30_000;
+/** How long to wait before retrying a bridge port held by a stale server. */
+const RETRY_BIND_MS = 2_000;
 
 export class ExtensionBridge {
   private wss: WebSocketServer | null = null;
@@ -20,6 +23,7 @@ export class ExtensionBridge {
   private pending = new Map<string, Pending>();
   private connectedAt: number | null = null;
   private seq = 0;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   start(port = Number(process.env.DEEPORAX_MCP_PORT ?? DEFAULT_PORT)): void {
     if (this.wss) return;
@@ -70,7 +74,27 @@ export class ExtensionBridge {
       socket.on("close", () => clearInterval(ping));
     });
 
-    this.wss.on("error", (err) => {
+    this.wss.on("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE") {
+        // A stale server from a previous session still owns the port. Keep
+        // retrying so the extension can connect once that process exits.
+        console.error(
+          `[deeporax-browser-mcp] port ${port} busy, retrying in ${RETRY_BIND_MS}ms`
+        );
+        try {
+          this.wss?.close();
+        } catch {
+          /* ignore */
+        }
+        this.wss = null;
+        if (!this.retryTimer) {
+          this.retryTimer = setTimeout(() => {
+            this.retryTimer = null;
+            this.start(port);
+          }, RETRY_BIND_MS);
+        }
+        return;
+      }
       console.error("[deeporax-browser-mcp] bridge error:", err.message);
     });
   }
@@ -93,9 +117,7 @@ export class ExtensionBridge {
 
   async call(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
     if (!this.client || this.client.readyState !== 1) {
-      throw new Error(
-        "Chrome extension not connected. Load the deeporax-browser-mcp extension in Chrome (package extension/ folder) and keep a browser window open."
-      );
+      throw new Error(loadExtensionHint());
     }
 
     const id = `req_${Date.now()}_${++this.seq}`;
