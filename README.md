@@ -10,7 +10,7 @@ Control a real Chrome browser from Claude (or any MCP client): navigate, snapsho
 
 After install, try a prompt like:
 
-> use the chrome mcp to create the google ads campaign for this project
+> use deeporax browser mcp to create the google ads campaign for this project
 
 Claude opens your Chrome, reads the page structure, and drives the UI while you watch.
 
@@ -63,7 +63,7 @@ Example configs also live in [`configs/`](configs/).
 3. Open `chrome://extensions`
 4. Enable **Developer mode**
 5. **Load unpacked** and select the unzipped folder
-6. Pin **deeporax-browser-mcp**. The badge shows **ON** when the MCP server is connected.
+6. Pin **Deeporax Browser MCP**. The badge shows **ON** when the MCP server is connected.
 
 **Option 2: load from the npm package**
 
@@ -150,6 +150,7 @@ bun run pack:dry
 | `browser_handle_dialog` | Pre-set alert/confirm/prompt behavior |
 | `browser_resize` | Resize the browser window |
 | `browser_batch` | Run multiple actions in one round-trip |
+| `browser_overlay` | Show/hide the agent-control overlay, or resume after Stop |
 | `browser_back` / `forward` / `reload` | History |
 
 **Agent loop that works well:**
@@ -158,6 +159,23 @@ bun run pack:dry
 2. `browser_snapshot`
 3. `browser_click` / `browser_type` using refs from the snapshot
 4. Snapshot again (refs go stale after navigation)
+
+## Agent control overlay
+
+While the agent acts on a tab, the extension shows a visible control layer so a human
+can follow along and intervene:
+
+- A pulsing orange border around the viewport
+- A status pill: **Deeporax agent** — *clicking link "Sign in"*
+- A **Stop** button that halts agent control for that tab
+- A synthetic cursor that glides to each target and pulses before the click fires
+
+The overlay renders in a closed shadow root and is `pointer-events: none` except the
+Stop button, so it cannot interfere with the page. It respects `prefers-reduced-motion`.
+
+After a user presses Stop, further actions in that tab fail until you call
+`browser_overlay` with `action: "resume"`. Pass `overlay: false` on an individual
+action to skip the visuals.
 
 ## Temporary files
 
@@ -197,10 +215,6 @@ The extension currently hardcodes port `17373`. Change both sides if you need an
 - MV3 service workers can sleep; an alarm + reconnect loop keeps the bridge healthy
 - Cross-origin iframes are not walked by the snapshot
 - One extension connection at a time (newest wins)
-
-## Not the same as npm `deeporax-browser-mcp`
-
-npm already has an unrelated package named [`deeporax-browser-mcp`](https://www.npmjs.com/package/deeporax-browser-mcp) (macOS DevTools / CDP). This project is **`deeporax-browser-mcp`**: a Chrome extension bridge for real DOM snapshots and interaction on macOS, Windows, and Linux.
 
 ## Contributing
 
