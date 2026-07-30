@@ -1,0 +1,3 @@
+[mcp_servers.deeporax-browser-mcp]
+command = "npx"
+args = ["-y", "deeporax-browser-mcp"]

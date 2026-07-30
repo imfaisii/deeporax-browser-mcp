@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "deeporax-browser-mcp": {
+      "command": "bunx",
+      "args": ["deeporax-browser-mcp"]
+    }
+  }
+}

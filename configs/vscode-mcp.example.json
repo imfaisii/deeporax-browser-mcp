@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "deeporax-browser-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "deeporax-browser-mcp"]
+    }
+  }
+}

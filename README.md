@@ -1,10 +1,12 @@
 # deeporax-browser-mcp
 
-Control a real Chrome browser from Claude (or any MCP client): navigate, snapshot the DOM with element refs, click, type, screenshot, and run JS.
+Control a real Chrome browser from any MCP client: navigate, snapshot the DOM with element refs, click, type, screenshot, read the console, and run JS.
 
 [![npm](https://img.shields.io/npm/v/deeporax-browser-mcp.svg)](https://www.npmjs.com/package/deeporax-browser-mcp)
 [![license](https://img.shields.io/npm/l/deeporax-browser-mcp.svg)](LICENSE)
 [![CI](https://github.com/imfaisii/deeporax-browser-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/imfaisii/deeporax-browser-mcp/actions/workflows/ci.yml)
+
+Unlike headless automation, this drives **your** browser: your profile, your logins, your session. The agent works inside the tabs you already have open, and an on-page overlay shows what it is doing with a Stop button.
 
 ## Demo
 
@@ -12,12 +14,12 @@ After install, try a prompt like:
 
 > use deeporax browser mcp to create the google ads campaign for this project
 
-Claude opens your Chrome, reads the page structure, and drives the UI while you watch.
+The agent opens your Chrome, reads the page structure, and drives the UI while you watch.
 
 ## Architecture
 
 ```
-Claude / MCP client
+AI client (Claude Code, Cursor, VS Code, ...)
         |  stdio (MCP)
         v
   deeporax-browser-mcp   (Node.js)
@@ -29,17 +31,45 @@ Claude / MCP client
   Your Chrome tabs (DOM + screenshots)
 ```
 
-## Quick start
+Install has two parts: **the MCP server** ([step A](#a-install-the-mcp-server)) and **the Chrome extension** ([step B](#b-install-the-chrome-extension)). Both are required.
 
-### A. Install the MCP server
+## A. Install the MCP server
 
-**Claude Code:**
+### Pick a runner
+
+Every config below uses `npx -y deeporax-browser-mcp`. Swap in whichever runner you prefer:
+
+| Runner | `command` | `args` |
+|---|---|---|
+| npm (default) | `npx` | `["-y", "deeporax-browser-mcp"]` |
+| Bun | `bunx` | `["deeporax-browser-mcp"]` |
+| pnpm | `pnpm` | `["dlx", "deeporax-browser-mcp"]` |
+| Yarn | `yarn` | `["dlx", "deeporax-browser-mcp"]` |
+| Deno | `deno` | `["run", "-A", "npm:deeporax-browser-mcp"]` |
+| Global install | `deeporax-browser-mcp` | `[]` |
+
+A global install starts faster and gives a **stable extension path**, which matters for [step B](#b-install-the-chrome-extension):
+
+```bash
+npm  install -g   deeporax-browser-mcp
+bun  add -g       deeporax-browser-mcp
+pnpm add -g       deeporax-browser-mcp
+yarn global add   deeporax-browser-mcp
+```
+
+Requires **Node.js 18+**.
+
+### Claude Code
 
 ```bash
 claude mcp add deeporax-browser-mcp -- npx -y deeporax-browser-mcp
 ```
 
-**Claude Desktop** (merge into your config file):
+Add `-s user` to enable it in every project. Verify with `claude mcp list`.
+
+### Cursor
+
+`~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (per project):
 
 ```json
 {
@@ -52,92 +82,218 @@ claude mcp add deeporax-browser-mcp -- npx -y deeporax-browser-mcp
 }
 ```
 
-Example configs also live in [`configs/`](configs/).
+### Windsurf
 
-### B. Install the Chrome extension
-
-**Option 1: download a release zip**
-
-1. Get `extension-dist.zip` from [GitHub Releases](https://github.com/imfaisii/deeporax-browser-mcp/releases)
-2. Unzip it
-3. Open `chrome://extensions`
-4. Enable **Developer mode**
-5. **Load unpacked** and select the unzipped folder
-6. Pin **Deeporax Browser MCP**. The badge shows **ON** when the MCP server is connected.
-
-**Option 2: load from the npm package**
-
-After the first `npx` run (or `npm install -g deeporax-browser-mcp`), the unpacked extension is inside the package:
-
-```bash
-node -e "const p=require('path');console.log(p.join(p.dirname(require.resolve('deeporax-browser-mcp/package.json')),'extension'))"
-```
-
-Load that folder the same way (Developer mode → Load unpacked).
-
-**Option 3: build from source**
-
-See [Install from source](#install-from-source). Load `packages/mcp-server/extension/` after `bun run build`.
-
-### C. Verify
-
-Ask Claude:
-
-> use browser_status then snapshot my current tab
-
-You should see `connected: true` and a DOM snapshot with refs like `e1`, `e2`.
-
-## Install from source
-
-```bash
-git clone https://github.com/imfaisii/deeporax-browser-mcp.git
-cd deeporax-browser-mcp
-bun install
-bun run build
-```
-
-Point your MCP config at the local binary:
+`~/.codeium/windsurf/mcp_config.json`:
 
 ```json
 {
   "mcpServers": {
     "deeporax-browser-mcp": {
-      "command": "node",
-      "args": ["/ABS/PATH/deeporax-browser-mcp/packages/mcp-server/dist/index.js"]
+      "command": "npx",
+      "args": ["-y", "deeporax-browser-mcp"]
     }
   }
 }
 ```
 
-Load the extension from `packages/mcp-server/extension/`.
+### VS Code (GitHub Copilot)
 
-Development commands:
+`.vscode/mcp.json` in your workspace. VS Code uses `servers`, not `mcpServers`:
 
-```bash
-bun run typecheck
-bun run smoke
-bun run pack:dry
+```json
+{
+  "servers": {
+    "deeporax-browser-mcp": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "deeporax-browser-mcp"]
+    }
+  }
+}
 ```
 
-## Releasing
+Then enable it from the tools picker in Copilot Chat (Agent mode).
 
-Publishing is driven by the version in `packages/mcp-server/package.json`.
+### Claude Desktop
 
-```bash
-bun run release patch     # or minor / major / an explicit x.y.z
-git push
+`claude_desktop_config.json`:
+
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "deeporax-browser-mcp": {
+      "command": "npx",
+      "args": ["-y", "deeporax-browser-mcp"]
+    }
+  }
+}
 ```
 
-`release` bumps all four version files in lockstep (root, server, extension
-package, and the Chrome manifest), rebuilds, runs the checks, and commits.
+Restart Claude Desktop after editing.
 
-On push to `main`, CI compares the version against npm. If it is new, CI
-publishes the package, tags the commit `vX.Y.Z`, and creates a GitHub Release
-with `extension-dist.zip` attached. If the version is already published, the
-job exits immediately, so ordinary pushes cost nothing.
+### Zed
 
-Requires an `NPM_TOKEN` repository secret (granular token, read and write,
-bypass 2FA).
+`settings.json`. Zed uses `context_servers`:
+
+```json
+{
+  "context_servers": {
+    "deeporax-browser-mcp": {
+      "source": "custom",
+      "command": "npx",
+      "args": ["-y", "deeporax-browser-mcp"]
+    }
+  }
+}
+```
+
+### Cline / Roo Code
+
+Open the MCP Servers panel, choose **Configure MCP Servers**, and add:
+
+```json
+{
+  "mcpServers": {
+    "deeporax-browser-mcp": {
+      "command": "npx",
+      "args": ["-y", "deeporax-browser-mcp"]
+    }
+  }
+}
+```
+
+### Continue
+
+`~/.continue/config.yaml`:
+
+```yaml
+mcpServers:
+  - name: deeporax-browser-mcp
+    command: npx
+    args: ["-y", "deeporax-browser-mcp"]
+```
+
+### Gemini CLI
+
+`~/.gemini/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "deeporax-browser-mcp": {
+      "command": "npx",
+      "args": ["-y", "deeporax-browser-mcp"]
+    }
+  }
+}
+```
+
+### Codex CLI
+
+`~/.codex/config.toml` (TOML, not JSON):
+
+```toml
+[mcp_servers.deeporax-browser-mcp]
+command = "npx"
+args = ["-y", "deeporax-browser-mcp"]
+```
+
+### opencode
+
+`opencode.json`:
+
+```json
+{
+  "mcp": {
+    "deeporax-browser-mcp": {
+      "type": "local",
+      "command": ["npx", "-y", "deeporax-browser-mcp"],
+      "enabled": true
+    }
+  }
+}
+```
+
+### Goose
+
+Settings → Extensions → **Add custom extension**, type **StandardIO**, command:
+
+```
+npx -y deeporax-browser-mcp
+```
+
+### JetBrains IDEs (AI Assistant / Junie)
+
+Settings → Tools → AI Assistant → **Model Context Protocol (MCP)** → **Add**, then use command `npx` with args `-y deeporax-browser-mcp`, or paste the standard `mcpServers` block.
+
+### Warp
+
+Settings → AI → **Manage MCP servers** → **Add**, then paste the standard `mcpServers` block.
+
+### LM Studio
+
+Program → **Install** → **Edit mcp.json**, then paste the standard `mcpServers` block.
+
+### Anything else
+
+Any MCP client that speaks stdio works. The universal shape is:
+
+```json
+{
+  "mcpServers": {
+    "deeporax-browser-mcp": {
+      "command": "npx",
+      "args": ["-y", "deeporax-browser-mcp"],
+      "env": { "DEEPORAX_MCP_PORT": "17373" }
+    }
+  }
+}
+```
+
+Ready-made examples live in [`configs/`](configs/).
+
+## B. Install the Chrome extension
+
+The npm package ships the unpacked extension. Works in Chrome, Edge, Brave, Arc, and other Chromium browsers.
+
+**Option 1: from the installed package (recommended)**
+
+Print the folder:
+
+```bash
+node -e "const p=require('path');console.log(p.join(p.dirname(require.resolve('deeporax-browser-mcp/package.json')),'extension'))"
+```
+
+Or ask your agent to run `browser_status`, which prints the exact path.
+
+Then:
+
+1. Open `chrome://extensions`
+2. Enable **Developer mode**
+3. **Load unpacked** and select that folder
+4. Pin **Deeporax Browser MCP**. The badge shows **ON** when the server is connected.
+
+> Prefer a **global install** for this step. With `npx`, the package lives in a cache directory that can move between runs.
+
+**Option 2: download a release zip**
+
+Grab `extension-dist.zip` from [Releases](https://github.com/imfaisii/deeporax-browser-mcp/releases), unzip, and load it the same way.
+
+**Option 3: build from source**
+
+See [Install from source](#install-from-source), then load `packages/mcp-server/extension/`.
+
+## C. Verify
+
+Ask your agent:
+
+> use browser_status then snapshot my current tab
+
+You should see `connected: true` and a DOM snapshot with refs like `e1`, `e2`.
 
 ## Tools
 
@@ -219,6 +375,54 @@ Snapshots and screenshots are written under:
 | `DEEPORAX_MCP_PORT` | `17373` | Local WebSocket port (server + extension must match) |
 
 The extension currently hardcodes port `17373`. Change both sides if you need another port.
+
+## Install from source
+
+```bash
+git clone https://github.com/imfaisii/deeporax-browser-mcp.git
+cd deeporax-browser-mcp
+bun install
+bun run build
+```
+
+`npm install`, `pnpm install`, and `yarn install` work too. The extension bundle is built with Bun.
+
+Point your MCP config at the local binary:
+
+```json
+{
+  "mcpServers": {
+    "deeporax-browser-mcp": {
+      "command": "node",
+      "args": ["/ABS/PATH/deeporax-browser-mcp/packages/mcp-server/dist/index.js"]
+    }
+  }
+}
+```
+
+Load the extension from `packages/mcp-server/extension/`.
+
+Development commands:
+
+```bash
+bun run typecheck
+bun run smoke
+bun run pack:dry
+```
+
+## Troubleshooting
+
+**`connected: false` or "extension not connected"**
+Chrome must be open with the extension loaded. Check that the toolbar badge reads **ON**, and that the folder you loaded matches the path `browser_status` reports.
+
+**`ERR_CONNECTION_REFUSED` on `127.0.0.1:17373` in the extension console**
+Nothing is serving the bridge yet. Your MCP client starts the server on demand, so open a chat session in that client. Do not run the server yourself in a terminal; two servers competing for the port is the usual cause.
+
+**Tools fail on `chrome://` pages**
+Chrome blocks extensions on `chrome://`, the Web Store, and other privileged pages. Switch to a normal `http(s)` tab.
+
+**Snapshot returns few elements on a complex app**
+Cross-origin iframes are not walked yet. Use `browser_evaluate` or a CSS selector for those regions.
 
 ## Security
 

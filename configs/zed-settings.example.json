@@ -1,0 +1,9 @@
+{
+  "context_servers": {
+    "deeporax-browser-mcp": {
+      "source": "custom",
+      "command": "npx",
+      "args": ["-y", "deeporax-browser-mcp"]
+    }
+  }
+}
