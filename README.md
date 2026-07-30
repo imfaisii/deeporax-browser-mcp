@@ -74,7 +74,12 @@ claude mcp add deeporax-browser-mcp -- npx -y deeporax-browser-mcp
 
 Add `-s user` to enable it in every project. Verify with `claude mcp list`.
 
-### Cursor
+### Other clients
+
+Click your tool to expand.
+
+<details>
+<summary><b>Cursor</b></summary>
 
 `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (per project):
 
@@ -89,7 +94,10 @@ Add `-s user` to enable it in every project. Verify with `claude mcp list`.
 }
 ```
 
-### Windsurf
+</details>
+
+<details>
+<summary><b>Windsurf</b></summary>
 
 `~/.codeium/windsurf/mcp_config.json`:
 
@@ -104,7 +112,10 @@ Add `-s user` to enable it in every project. Verify with `claude mcp list`.
 }
 ```
 
-### VS Code (GitHub Copilot)
+</details>
+
+<details>
+<summary><b>VS Code (GitHub Copilot)</b></summary>
 
 `.vscode/mcp.json` in your workspace. VS Code uses `servers`, not `mcpServers`:
 
@@ -122,7 +133,10 @@ Add `-s user` to enable it in every project. Verify with `claude mcp list`.
 
 Then enable it from the tools picker in Copilot Chat (Agent mode).
 
-### Claude Desktop
+</details>
+
+<details>
+<summary><b>Claude Desktop</b></summary>
 
 `claude_desktop_config.json`:
 
@@ -142,7 +156,10 @@ Then enable it from the tools picker in Copilot Chat (Agent mode).
 
 Restart Claude Desktop after editing.
 
-### Zed
+</details>
+
+<details>
+<summary><b>Zed</b></summary>
 
 `settings.json`. Zed uses `context_servers`:
 
@@ -158,7 +175,10 @@ Restart Claude Desktop after editing.
 }
 ```
 
-### Cline / Roo Code
+</details>
+
+<details>
+<summary><b>Cline / Roo Code</b></summary>
 
 Open the MCP Servers panel, choose **Configure MCP Servers**, and add:
 
@@ -173,7 +193,10 @@ Open the MCP Servers panel, choose **Configure MCP Servers**, and add:
 }
 ```
 
-### Continue
+</details>
+
+<details>
+<summary><b>Continue</b></summary>
 
 `~/.continue/config.yaml`:
 
@@ -184,7 +207,10 @@ mcpServers:
     args: ["-y", "deeporax-browser-mcp"]
 ```
 
-### Gemini CLI
+</details>
+
+<details>
+<summary><b>Gemini CLI</b></summary>
 
 `~/.gemini/settings.json`:
 
@@ -199,7 +225,10 @@ mcpServers:
 }
 ```
 
-### Codex CLI
+</details>
+
+<details>
+<summary><b>Codex CLI</b></summary>
 
 `~/.codex/config.toml` (TOML, not JSON):
 
@@ -209,7 +238,10 @@ command = "npx"
 args = ["-y", "deeporax-browser-mcp"]
 ```
 
-### opencode
+</details>
+
+<details>
+<summary><b>opencode</b></summary>
 
 `opencode.json`:
 
@@ -225,7 +257,10 @@ args = ["-y", "deeporax-browser-mcp"]
 }
 ```
 
-### Goose
+</details>
+
+<details>
+<summary><b>Goose</b></summary>
 
 Settings → Extensions → **Add custom extension**, type **StandardIO**, command:
 
@@ -233,19 +268,31 @@ Settings → Extensions → **Add custom extension**, type **StandardIO**, comma
 npx -y deeporax-browser-mcp
 ```
 
-### JetBrains IDEs (AI Assistant / Junie)
+</details>
+
+<details>
+<summary><b>JetBrains IDEs (AI Assistant / Junie)</b></summary>
 
 Settings → Tools → AI Assistant → **Model Context Protocol (MCP)** → **Add**, then use command `npx` with args `-y deeporax-browser-mcp`, or paste the standard `mcpServers` block.
 
-### Warp
+</details>
+
+<details>
+<summary><b>Warp</b></summary>
 
 Settings → AI → **Manage MCP servers** → **Add**, then paste the standard `mcpServers` block.
 
-### LM Studio
+</details>
+
+<details>
+<summary><b>LM Studio</b></summary>
 
 Program → **Install** → **Edit mcp.json**, then paste the standard `mcpServers` block.
 
-### Anything else
+</details>
+
+<details>
+<summary><b>Anything else</b></summary>
 
 Any MCP client that speaks stdio works. The universal shape is:
 
@@ -260,6 +307,8 @@ Any MCP client that speaks stdio works. The universal shape is:
   }
 }
 ```
+
+</details>
 
 Ready-made examples live in [`configs/`](configs/).
 
