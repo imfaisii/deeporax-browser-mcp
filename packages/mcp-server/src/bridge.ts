@@ -3,7 +3,8 @@ import {
   DEFAULT_PORT,
   isHello,
   isResponse,
-  isYield,
+  isWhois,
+  isOwner,
   type BridgeRequest,
 } from "./protocol.js";
 import { loadExtensionHint } from "./paths.js";
@@ -15,13 +16,16 @@ type Pending = {
 };
 
 const REQUEST_TIMEOUT_MS = 30_000;
-/** How long to wait before retrying a bridge port held by another server. */
-const RETRY_BIND_MS = 2_000;
 /**
- * Give up after this many attempts. A losing server must not spin forever: it
- * would wake the CPU every couple of seconds for the life of the session.
+ * How often a server without the port checks whether it has been freed.
+ *
+ * There is no attempt limit. A server that stops watching can never recover
+ * when the holder exits, and the only way back is for the user to restart the
+ * whole session, which is exactly the failure this replaced.
  */
-const MAX_BIND_ATTEMPTS = 10;
+const WATCH_BIND_MS = 3_000;
+/** Re-check who owns the port every this many watch ticks. */
+const REPROBE_EVERY = 10;
 
 export class ExtensionBridge {
   private wss: WebSocketServer | null = null;
@@ -31,8 +35,10 @@ export class ExtensionBridge {
   private seq = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private bindAttempts = 0;
-  /** Set when we permanently lost the port to another live server. */
-  private standby = false;
+  /** True while another live server holds the port and we are waiting for it. */
+  private waiting = false;
+  /** Process id of whoever holds the port, so errors can name it. */
+  private ownerPid: number | null = null;
 
   start(port = Number(process.env.DEEPORAX_MCP_PORT ?? DEFAULT_PORT)): void {
     if (this.wss) return;
@@ -41,29 +47,79 @@ export class ExtensionBridge {
 
     this.wss.on("listening", () => {
       this.bindAttempts = 0;
-      this.standby = false;
+      this.waiting = false;
+      this.ownerPid = null;
       console.error(`[deeporax-browser-mcp] bridge listening on ws://127.0.0.1:${port}`);
     });
 
     this.wss.on("connection", (socket) => {
-      // Only one extension client at a time; newest wins.
-      if (this.client && this.client !== socket) {
-        try {
-          this.client.close(4000, "replaced by new connection");
-        } catch {
-          /* ignore */
-        }
-      }
+      // A new socket is on probation until it identifies itself. Another
+      // server probing this port is also a connection, and adopting it as the
+      // extension would drop the real one: that alone produced a disconnect
+      // every few seconds while a second session was retrying.
+      let adopted = false;
 
-      this.client = socket;
-      this.connectedAt = Date.now();
-      console.error("[deeporax-browser-mcp] extension connected");
+      const adopt = () => {
+        if (adopted) return;
+        adopted = true;
+        if (this.client && this.client !== socket) {
+          try {
+            this.client.close(4000, "replaced by new connection");
+          } catch {
+            /* ignore */
+          }
+        }
+        this.client = socket;
+        this.connectedAt = Date.now();
+        console.error("[deeporax-browser-mcp] extension connected");
+      };
+
+      // Anything that never says hello is not the extension; hang up on it.
+      const probation = setTimeout(() => {
+        if (!adopted) {
+          try {
+            socket.close(4002, "did not identify as the extension");
+          } catch {
+            /* ignore */
+          }
+        }
+      }, 2_000);
 
       socket.on("message", (raw) => {
-        this.onMessage(String(raw));
+        const text = String(raw);
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = null;
+        }
+
+        // Answer a peer server's probe without disturbing the extension.
+        if (isWhois(parsed)) {
+          try {
+            socket.send(
+              JSON.stringify({
+                type: "owner",
+                pid: process.pid,
+                hasExtension: this.client?.readyState === 1,
+              })
+            );
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+
+        if (isHello(parsed)) {
+          clearTimeout(probation);
+          adopt();
+        }
+        if (!adopted) return;
+        this.onMessage(text);
       });
 
       socket.on("close", () => {
+        clearTimeout(probation);
         if (this.client === socket) {
           this.client = null;
           this.connectedAt = null;
@@ -97,25 +153,24 @@ export class ExtensionBridge {
         this.wss = null;
         this.bindAttempts += 1;
 
-        if (this.bindAttempts > MAX_BIND_ATTEMPTS) {
-          this.standby = true;
+        // Whoever bound first keeps serving. Taking the port away from a live
+        // server drops its extension connection mid-call, and with more than
+        // two sessions open they take turns evicting each other forever.
+        if (!this.waiting) {
+          this.waiting = true;
           console.error(
-            `[deeporax-browser-mcp] port ${port} is owned by another live server; ` +
-              "staying in standby. Tools will report the conflict instead of retrying."
+            `[deeporax-browser-mcp] port ${port} is held by another server; ` +
+              "waiting for it to exit rather than taking it."
           );
-          return;
         }
-
-        console.error(
-          `[deeporax-browser-mcp] port ${port} busy, retry ` +
-            `${this.bindAttempts}/${MAX_BIND_ATTEMPTS} in ${RETRY_BIND_MS}ms`
-        );
-        this.askIncumbentToYield(port);
+        if (this.bindAttempts === 1 || this.bindAttempts % REPROBE_EVERY === 0) {
+          this.probeOwner(port);
+        }
         if (!this.retryTimer) {
           this.retryTimer = setTimeout(() => {
             this.retryTimer = null;
             this.start(port);
-          }, RETRY_BIND_MS);
+          }, WATCH_BIND_MS);
         }
         return;
       }
@@ -124,31 +179,10 @@ export class ExtensionBridge {
   }
 
   /**
-   * Close our listener so a newer server can bind. Any connected extension is
-   * dropped; it reconnects to whoever owns the port next.
+   * Ask the port holder who it is, so a failure can name the process to close.
+   * Read-only: the holder answers and keeps its extension connection.
    */
-  private releaseForTakeover(): void {
-    this.failAll("Bridge handed over to a newer server");
-    try {
-      this.client?.close(4001, "server handover");
-    } catch {
-      /* ignore */
-    }
-    this.client = null;
-    this.connectedAt = null;
-    try {
-      this.wss?.close();
-    } catch {
-      /* ignore */
-    }
-    this.wss = null;
-  }
-
-  /**
-   * Ask whoever holds the port to step aside. Harmless if the socket belongs to
-   * something else entirely: it just receives a message it ignores.
-   */
-  private askIncumbentToYield(port: number): void {
+  private probeOwner(port: number): void {
     let sock: WsClient;
     try {
       sock = new WsClient(`ws://127.0.0.1:${port}`);
@@ -162,15 +196,29 @@ export class ExtensionBridge {
         /* ignore */
       }
     };
+    const giveUp = setTimeout(done, 1_000);
     sock.on("open", () => {
       try {
-        sock.send(JSON.stringify({ type: "yield", pid: process.pid }));
+        sock.send(JSON.stringify({ type: "whois" }));
       } catch {
-        /* ignore */
+        done();
       }
-      setTimeout(done, 200);
     });
-    sock.on("error", done);
+    sock.on("message", (raw) => {
+      let msg: unknown;
+      try {
+        msg = JSON.parse(String(raw));
+      } catch {
+        return;
+      }
+      if (isOwner(msg)) this.ownerPid = msg.pid;
+      clearTimeout(giveUp);
+      done();
+    });
+    sock.on("error", () => {
+      clearTimeout(giveUp);
+      done();
+    });
   }
 
   stop(): void {
@@ -190,7 +238,8 @@ export class ExtensionBridge {
       connected: this.client?.readyState === 1,
       connectedAt: this.connectedAt,
       pendingRequests: this.pending.size,
-      standby: this.standby,
+      waiting: this.waiting,
+      ownerPid: this.ownerPid,
     };
   }
 
@@ -204,11 +253,12 @@ export class ExtensionBridge {
     timeoutMs: number = REQUEST_TIMEOUT_MS
   ): Promise<unknown> {
     if (!this.client || this.client.readyState !== 1) {
-      if (this.standby) {
+      if (this.waiting) {
+        const who = this.ownerPid ? ` (process ${this.ownerPid})` : "";
         throw new Error(
-          "Another deeporax-browser-mcp server already owns the bridge port. " +
-            "Close the other MCP client (or its stale process) and retry; this " +
-            "server is idle and will not fight for the port."
+          `Another deeporax-browser-mcp server${who} is already connected to Chrome. ` +
+            "Only one can drive the browser at a time. Use that session, or close it " +
+            "and this server will pick the browser up within a few seconds."
         );
       }
       throw new Error(loadExtensionHint());
@@ -241,14 +291,6 @@ export class ExtensionBridge {
       msg = JSON.parse(raw);
     } catch {
       console.error("[deeporax-browser-mcp] invalid JSON from extension");
-      return;
-    }
-
-    if (isYield(msg)) {
-      console.error(
-        `[deeporax-browser-mcp] newer server (pid ${msg.pid}) requested the port; releasing it`
-      );
-      this.releaseForTakeover();
       return;
     }
 
