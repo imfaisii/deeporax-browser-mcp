@@ -22,9 +22,61 @@ export type RefEntry = {
 
 declare global {
   interface Window {
-    __deeporaxRefs?: Map<string, Element>;
+    __deeporaxRefs?: Map<string, WeakRef<Element>>;
+    __deeporaxRefsBack?: WeakMap<Element, string>;
+    __deeporaxRefSeq?: number;
     __deeporaxHandle?: (method: string, params: Record<string, unknown>) => unknown;
   }
+}
+
+/**
+ * Refs are bound to an element for as long as that element lives.
+ *
+ * Numbering them per snapshot in document order looks tidy and is quietly
+ * dangerous: a page that inserts a cookie banner shifts every ref by one, so a
+ * ref taken from an earlier snapshot silently addresses a different element and
+ * the write lands in the wrong field with no error. Keeping an identity index
+ * means a ref either still means what it meant, or fails loudly.
+ *
+ * These live on `window` rather than in module scope because the injection
+ * fallback evaluates a fresh copy of this module, and both copies have to agree
+ * on what "e7" points at. Weak references let the page garbage collect nodes it
+ * has thrown away instead of us pinning every element we ever saw.
+ */
+function refStore(): Map<string, WeakRef<Element>> {
+  if (!window.__deeporaxRefs) window.__deeporaxRefs = new Map();
+  return window.__deeporaxRefs;
+}
+
+function refIndex(): WeakMap<Element, string> {
+  if (!window.__deeporaxRefsBack) window.__deeporaxRefsBack = new WeakMap();
+  return window.__deeporaxRefsBack;
+}
+
+/** Reuse this element's existing ref, or mint one that is never reused. */
+function refFor(el: Element): string {
+  const store = refStore();
+  const index = refIndex();
+
+  const existing = index.get(el);
+  if (existing && store.get(existing)?.deref() === el) return existing;
+
+  const ref = `e${(window.__deeporaxRefSeq = (window.__deeporaxRefSeq ?? 0) + 1)}`;
+  store.set(ref, new WeakRef(el));
+  index.set(el, ref);
+  return ref;
+}
+
+/** Drop entries whose element has been collected. */
+function sweepRefs(): void {
+  const store = refStore();
+  for (const [ref, weak] of store) {
+    if (!weak.deref()) store.delete(ref);
+  }
+}
+
+function refElement(ref: string): Element | undefined {
+  return refStore().get(ref)?.deref();
 }
 
 const INTERESTING_SELECTOR = [
@@ -137,13 +189,10 @@ function isVisible(el: Element): boolean {
 
 export function buildSnapshot(opts: {
   interestingOnly?: boolean;
-  maxDepth?: number;
   maxElements?: number;
 }): { text: string; refs: Record<string, RefEntry>; url: string; title: string } {
   const interestingOnly = opts.interestingOnly !== false;
-  const refs = new Map<string, Element>();
   const refMeta: Record<string, RefEntry> = {};
-  let counter = 0;
 
   const lines: string[] = [];
   lines.push(`- page: ${document.title}`);
@@ -170,8 +219,7 @@ export function buildSnapshot(opts: {
   const shown = filtered.slice(0, maxElements);
 
   for (const el of shown) {
-    const ref = `e${++counter}`;
-    refs.set(ref, el);
+    const ref = refFor(el);
     const role = roleOf(el);
     const name = nameOf(el);
     const selector = cssPath(el);
@@ -201,7 +249,7 @@ export function buildSnapshot(opts: {
     );
   }
 
-  window.__deeporaxRefs = refs;
+  sweepRefs();
 
   return {
     text: lines.join("\n"),
@@ -230,10 +278,15 @@ function resolveEl(params: Record<string, unknown>): Element {
   const selector = params.selector as string | undefined;
 
   if (ref) {
-    const el = window.__deeporaxRefs?.get(ref);
-    if (!el || !document.contains(el)) {
+    const el = refElement(ref);
+    if (!el) {
       throw new Error(
         `Unknown or stale ref "${ref}". Run browser_snapshot again and use a fresh ref.`
+      );
+    }
+    if (!document.contains(el)) {
+      throw new Error(
+        `Ref "${ref}" points at an element the page has since removed. Run browser_snapshot again and use a fresh ref.`
       );
     }
     return el;
@@ -297,6 +350,23 @@ function editableTarget(el: Element): HTMLElement {
   );
 }
 
+/**
+ * Fields whose contents must never reach the model.
+ *
+ * A failed write reports what the field actually holds so the caller can see
+ * why it disagreed, which is exactly the wrong thing to do for a password or a
+ * one-time code. The autocomplete tokens are the portable signal: sites set
+ * them so password managers behave, which makes them reliable here too.
+ */
+const SECRET_AUTOCOMPLETE =
+  /(^|\s)(current-password|new-password|one-time-code|cc-number|cc-csc|cc-exp)/i;
+
+function isSecretField(el: Element): boolean {
+  const type = ((el as HTMLInputElement).type || "").toLowerCase();
+  if (type === "password" || type === "hidden") return true;
+  return SECRET_AUTOCOMPLETE.test(el.getAttribute("autocomplete") ?? "");
+}
+
 function fieldValue(el: Element): string {
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
     return el.value;
@@ -351,7 +421,6 @@ export function handleDomMethod(
     case "snapshot":
       return buildSnapshot({
         interestingOnly: params.interestingOnly as boolean | undefined,
-        maxDepth: params.maxDepth as number | undefined,
         maxElements: params.maxElements as number | undefined,
       });
 
@@ -546,8 +615,9 @@ export function handleDomMethod(
       // Prefer live refs from last snapshot
       const refs = window.__deeporaxRefs;
       if (refs && refs.size) {
-        for (const [ref, el] of refs) {
-          if (!document.contains(el)) continue;
+        for (const [ref, weak] of refs) {
+          const el = weak.deref();
+          if (!el || !document.contains(el)) continue;
           const role = roleOf(el);
           const name = nameOf(el);
           const text = ((el as HTMLElement).innerText || el.textContent || "").replace(/\s+/g, " ").trim();
@@ -784,7 +854,14 @@ export function handleDomMethod(
      */
     case "resolve_target": {
       const el = resolveEl(params) as HTMLElement;
-      el.scrollIntoView({ block: "center", inline: "center" });
+      el.scrollIntoView({
+        block: "center",
+        inline: "center",
+        behavior: "instant" as ScrollBehavior,
+      });
+      // Force the scroll to settle before measuring, otherwise the rect can
+      // still describe the pre-scroll position.
+      void el.offsetHeight;
 
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) {
@@ -901,6 +978,7 @@ export function handleDomMethod(
         readOnly: Boolean(anyEl.readOnly),
         disabled: Boolean(anyEl.disabled) || el.getAttribute("aria-disabled") === "true",
         inputType: (anyEl.type || "").toLowerCase(),
+        secret: isSecretField(el),
         ariaInvalid: el.getAttribute("aria-invalid") ?? "",
         valid: anyEl.validity ? anyEl.validity.valid : true,
         focused: document.activeElement === el,

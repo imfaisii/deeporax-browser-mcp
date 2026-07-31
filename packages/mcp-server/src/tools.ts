@@ -169,7 +169,6 @@ export function registerTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe("If true (default), only interactive/meaningful nodes"),
-      maxDepth: z.number().int().min(1).max(20).optional(),
       persistOnly: z
         .boolean()
         .optional()
@@ -177,12 +176,12 @@ export function registerTools(server: McpServer): void {
           "If true, return only the /tmp file path (not the full snapshot body). Default false."
         ),
     },
-    async ({ tabId: id, interestingOnly, maxDepth, persistOnly }) => {
+    async ({ tabId: id, interestingOnly, maxElements, persistOnly }) => {
       try {
         const result = await call("snapshot", {
           tabId: id,
           interestingOnly: interestingOnly ?? true,
-          maxDepth: maxDepth ?? 12,
+          maxElements,
         });
 
         const text =

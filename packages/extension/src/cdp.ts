@@ -18,7 +18,7 @@ const PROTOCOL_VERSION = "1.3";
 /** Tabs we currently hold a debugger session on. */
 const attached = new Set<number>();
 /** Tabs where attaching failed, so we stop retrying every call. */
-const unavailable = new Map<number, string>();
+const unavailable = new Map<number, { message: string; at: number }>();
 
 export type MouseButton = "left" | "right" | "middle";
 
@@ -85,12 +85,23 @@ function describeKey(raw: string) {
  * Returns false when Chrome refuses, most often because DevTools is already
  * open on that tab. Callers fall back to synthetic events and say so.
  */
+const RETRY_ATTACH_AFTER_MS = 5_000;
+
 export async function attach(tabId: number): Promise<boolean> {
   if (attached.has(tabId)) return true;
-  if (unavailable.has(tabId)) return false;
+
+  // Remember a failure only briefly. The usual cause is DevTools being open,
+  // and the user can close it at any moment; refusing until the tab navigates
+  // made the extension look broken long after the problem was gone.
+  const failedAt = unavailable.get(tabId);
+  if (failedAt && Date.now() - failedAt.at < RETRY_ATTACH_AFTER_MS) return false;
 
   try {
-    await chrome.debugger.attach({ tabId }, PROTOCOL_VERSION);
+    await withTimeout(
+      chrome.debugger.attach({ tabId }, PROTOCOL_VERSION),
+      ATTACH_TIMEOUT_MS,
+      "debugger attach"
+    );
     attached.add(tabId);
     return true;
   } catch (err) {
@@ -101,7 +112,7 @@ export async function attach(tabId: number): Promise<boolean> {
       attached.add(tabId);
       return true;
     }
-    unavailable.set(tabId, message);
+    unavailable.set(tabId, { message, at: Date.now() });
     console.debug("[deeporax] debugger attach failed:", message);
     return false;
   }
@@ -122,7 +133,7 @@ export function isAttached(tabId: number): boolean {
 }
 
 export function unavailableReason(tabId: number): string | undefined {
-  return unavailable.get(tabId);
+  return unavailable.get(tabId)?.message;
 }
 
 /** Forget cached state for a tab so the next call can try attaching again. */
@@ -131,12 +142,70 @@ export function forget(tabId: number): void {
   unavailable.delete(tabId);
 }
 
+/** A frozen renderer must not hang the caller forever. */
+const ATTACH_TIMEOUT_MS = 8_000;
+const COMMAND_TIMEOUT_MS = 30_000;
+
+function withTimeout<T>(work: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () =>
+        reject(
+          new Error(
+            `${what} timed out after ${ms}ms. The page may be showing a native dialog, ` +
+              "or the renderer may be busy. Dismiss any dialog and retry."
+          )
+        ),
+      ms
+    );
+    work.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
+}
+
 export async function send<T = unknown>(
   tabId: number,
   method: string,
   params: Record<string, unknown> = {}
 ): Promise<T> {
-  return (await chrome.debugger.sendCommand({ tabId }, method, params)) as T;
+  try {
+    return (await withTimeout(
+      chrome.debugger.sendCommand({ tabId }, method, params),
+      COMMAND_TIMEOUT_MS,
+      method
+    )) as T;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Chrome dropped the session underneath us (the user dismissed the
+    // debugging banner, or the tab swapped renderers). Reattaching and
+    // repeating is safe for reads; repeating an input event is not, because
+    // the first one may already have landed.
+    if (/not attached|detached while/i.test(message)) {
+      attached.delete(tabId);
+      if (/^Input\./.test(method)) {
+        throw new Error(
+          `The debugger session dropped during ${method}, so this input may or may not have ` +
+            "been delivered. Take a fresh browser_snapshot to see the real state before retrying."
+        );
+      }
+      if (await attach(tabId)) {
+        return (await withTimeout(
+          chrome.debugger.sendCommand({ tabId }, method, params),
+          COMMAND_TIMEOUT_MS,
+          method
+        )) as T;
+      }
+    }
+    throw err;
+  }
 }
 
 // --- Input ------------------------------------------------------------------

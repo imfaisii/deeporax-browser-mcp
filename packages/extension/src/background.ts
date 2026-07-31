@@ -297,7 +297,7 @@ async function safeDom(
     // the answer, not a transport problem. Retrying via injection would only
     // reproduce it and bury the useful text.
     if (
-      /stale|Unknown or stale|No element matches|not a <select>|not a text field|zero size|Provide either/i.test(
+      /stale|Unknown or stale|since removed|No element matches|not a <select>|not a text field|zero size|is disabled|read-only|Provide either/i.test(
         a
       )
     ) {

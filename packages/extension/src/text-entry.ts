@@ -28,6 +28,8 @@ export type FieldProbe = {
   disabled: boolean;
   inputType: string;
   ariaInvalid: string;
+  /** True when the field holds a credential, so its contents must not be echoed. */
+  secret: boolean;
   valid: boolean;
   focused: boolean;
   tag: string;
@@ -275,18 +277,20 @@ export async function setText(
   }
 
   const actual = last?.value ?? before.value;
+  // Report shape, never contents, when the field holds a credential.
+  const show = (v: string) => (before.secret ? `[redacted, ${v.length} chars]` : JSON.stringify(v));
   return {
     ok: false,
     trusted: true,
     changed: actual !== before.value,
-    value: actual,
-    expected,
+    value: before.secret ? `[redacted, ${actual.length} chars]` : actual,
+    expected: before.secret ? `[redacted, ${expected.length} chars]` : expected,
     match: "mismatch",
     strategy: "none",
     attempts,
     warning:
-      `Could not set this field to ${JSON.stringify(expected)}. ` +
-      `After trying ${attempts.join(", ")} it holds ${JSON.stringify(actual)} ` +
+      `Could not set this field to ${show(expected)}. ` +
+      `After trying ${attempts.join(", ")} it holds ${show(actual)} ` +
       `(${actual.length} characters, expected ${expected.length}). ` +
       "The page may be rewriting the value, or this may not be the field you meant. " +
       "Take a fresh snapshot and confirm the target before retrying.",
@@ -305,8 +309,8 @@ function succeed(
     ok: true,
     trusted: strategy.trusted,
     changed: after.value !== before.value,
-    value: after.value,
-    expected,
+    value: after.secret ? `[redacted, ${after.value.length} chars]` : after.value,
+    expected: after.secret ? `[redacted, ${expected.length} chars]` : expected,
     match,
     strategy: strategy.name,
     attempts,
