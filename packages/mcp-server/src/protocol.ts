@@ -37,12 +37,13 @@ export type PongMessage = { type: "pong" };
  * The old server shuts its listener down so the new one can take over. This
  * keeps a single MCP host in control when an earlier process was orphaned.
  */
-/** Sent to whoever holds the port to ask who they are. */
-export type WhoisMessage = { type: "whois" };
-export type OwnerMessage = {
-  type: "owner";
-  pid: number;
-  hasExtension: boolean;
+/** Sent by a server that could not bind, to work through the one that did. */
+export type PeerHelloMessage = { type: "peer"; pid: number };
+/** Host tells its peers whether the browser is actually reachable. */
+export type PeerStatusMessage = {
+  type: "peerStatus";
+  connected: boolean;
+  ownerPid: number;
 };
 
 export type BridgeMessage =
@@ -51,8 +52,8 @@ export type BridgeMessage =
   | HelloMessage
   | PingMessage
   | PongMessage
-  | WhoisMessage
-  | OwnerMessage;
+  | PeerHelloMessage
+  | PeerStatusMessage;
 
 export function isRequest(msg: unknown): msg is BridgeRequest {
   return (
@@ -75,25 +76,22 @@ export function isResponse(msg: unknown): msg is BridgeResponse {
   );
 }
 
-export function isWhois(msg: unknown): msg is WhoisMessage {
-  return (
-    typeof msg === "object" && msg !== null && (msg as WhoisMessage).type === "whois"
-  );
-}
-
-export function isOwner(msg: unknown): msg is OwnerMessage {
-  return (
-    typeof msg === "object" &&
-    msg !== null &&
-    (msg as OwnerMessage).type === "owner" &&
-    typeof (msg as OwnerMessage).pid === "number"
-  );
-}
-
 export function isHello(msg: unknown): msg is HelloMessage {
   return (
+    typeof msg === "object" && msg !== null && (msg as HelloMessage).type === "hello"
+  );
+}
+
+export function isPeerHello(msg: unknown): msg is PeerHelloMessage {
+  return (
+    typeof msg === "object" && msg !== null && (msg as PeerHelloMessage).type === "peer"
+  );
+}
+
+export function isPeerStatus(msg: unknown): msg is PeerStatusMessage {
+  return (
     typeof msg === "object" &&
     msg !== null &&
-    (msg as HelloMessage).type === "hello"
+    (msg as PeerStatusMessage).type === "peerStatus"
   );
 }

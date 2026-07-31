@@ -3,8 +3,9 @@ import {
   DEFAULT_PORT,
   isHello,
   isResponse,
-  isWhois,
-  isOwner,
+  isPeerHello,
+  isRequest,
+  isPeerStatus,
   type BridgeRequest,
 } from "./protocol.js";
 import { loadExtensionHint } from "./paths.js";
@@ -24,8 +25,6 @@ const REQUEST_TIMEOUT_MS = 30_000;
  * whole session, which is exactly the failure this replaced.
  */
 const WATCH_BIND_MS = 3_000;
-/** Re-check who owns the port every this many watch ticks. */
-const REPROBE_EVERY = 10;
 
 export class ExtensionBridge {
   private wss: WebSocketServer | null = null;
@@ -39,9 +38,25 @@ export class ExtensionBridge {
   private waiting = false;
   /** Process id of whoever holds the port, so errors can name it. */
   private ownerPid: number | null = null;
+  /**
+   * Set when another server holds the port and we work through it.
+   *
+   * Only one process can own the port, but every editor session starts its own
+   * server, and a session whose server cannot bind used to be dead. Rather than
+   * fight over the port, the servers that lose it become clients of the one
+   * that won and forward their calls through it, so every session can drive the
+   * browser at once.
+   */
+  private peerSocket: WsClient | null = null;
+  /** Host's view of whether the browser is reachable, as told to its peers. */
+  private remoteConnected = false;
+  /** Peer servers working through this one. */
+  private peers = new Set<WebSocket>();
+  /** Which peer is waiting on which request id. */
+  private peerRoutes = new Map<string, WebSocket>();
 
   start(port = Number(process.env.DEEPORAX_MCP_PORT ?? DEFAULT_PORT)): void {
-    if (this.wss) return;
+    if (this.wss || this.peerSocket) return;
 
     this.wss = new WebSocketServer({ host: "127.0.0.1", port });
 
@@ -98,6 +113,7 @@ export class ExtensionBridge {
         this.client = socket;
         this.connectedAt = Date.now();
         console.error("[deeporax-browser-mcp] extension connected");
+        this.tellAllPeers();
       };
 
       // Anything that never says hello is not the extension; hang up on it.
@@ -120,19 +136,25 @@ export class ExtensionBridge {
           parsed = null;
         }
 
-        // Answer a peer server's probe without disturbing the extension.
-        if (isWhois(parsed)) {
-          try {
-            socket.send(
-              JSON.stringify({
-                type: "owner",
-                pid: process.pid,
-                hasExtension: this.client?.readyState === 1,
-              })
+        // Another server working through this one. It is a local process, so
+        // it carries no Origin and was not filtered above; that is the same
+        // trust level any local process has always had. Web pages are still
+        // refused, which is the boundary that matters.
+        if (isPeerHello(parsed)) {
+          clearTimeout(probation);
+          if (!this.peers.has(socket)) {
+            this.peers.add(socket);
+            console.error(
+              `[deeporax-browser-mcp] server ${parsed.pid} joined as a peer`
             );
-          } catch {
-            /* ignore */
           }
+          this.tellPeer(socket);
+          return;
+        }
+
+        // A peer's tool call: hand it to the extension and remember who asked.
+        if (this.peers.has(socket) && isRequest(parsed)) {
+          this.forwardFromPeer(socket, parsed);
           return;
         }
 
@@ -146,11 +168,17 @@ export class ExtensionBridge {
 
       socket.on("close", () => {
         clearTimeout(probation);
+        if (this.peers.delete(socket)) {
+          for (const [id, peer] of this.peerRoutes) {
+            if (peer === socket) this.peerRoutes.delete(id);
+          }
+        }
         if (this.client === socket) {
           this.client = null;
           this.connectedAt = null;
           console.error("[deeporax-browser-mcp] extension disconnected");
           this.failAll("Extension disconnected");
+          this.tellAllPeers();
         }
       });
 
@@ -186,18 +214,10 @@ export class ExtensionBridge {
           this.waiting = true;
           console.error(
             `[deeporax-browser-mcp] port ${port} is held by another server; ` +
-              "waiting for it to exit rather than taking it."
+              "joining it as a peer so this session can use the browser too."
           );
         }
-        if (this.bindAttempts === 1 || this.bindAttempts % REPROBE_EVERY === 0) {
-          this.probeOwner(port);
-        }
-        if (!this.retryTimer) {
-          this.retryTimer = setTimeout(() => {
-            this.retryTimer = null;
-            this.start(port);
-          }, WATCH_BIND_MS);
-        }
+        this.joinHost(port);
         return;
       }
       console.error("[deeporax-browser-mcp] bridge error:", err.message);
@@ -205,31 +225,32 @@ export class ExtensionBridge {
   }
 
   /**
-   * Ask the port holder who it is, so a failure can name the process to close.
-   * Read-only: the holder answers and keeps its extension connection.
+   * Work through the server that owns the port.
+   *
+   * If that server goes away this socket closes, and we try to bind again;
+   * whichever peer gets there first becomes the new host and the rest rejoin
+   * it. No session is left without the browser.
    */
-  private probeOwner(port: number): void {
+  private joinHost(port: number): void {
+    if (this.peerSocket) return;
+
     let sock: WsClient;
     try {
       sock = new WsClient(`ws://127.0.0.1:${port}`);
     } catch {
+      this.scheduleRebind(port);
       return;
     }
-    const done = () => {
-      try {
-        sock.close();
-      } catch {
-        /* ignore */
-      }
-    };
-    const giveUp = setTimeout(done, 1_000);
+    this.peerSocket = sock;
+
     sock.on("open", () => {
       try {
-        sock.send(JSON.stringify({ type: "whois" }));
+        sock.send(JSON.stringify({ type: "peer", pid: process.pid }));
       } catch {
-        done();
+        /* the close handler retries */
       }
     });
+
     sock.on("message", (raw) => {
       let msg: unknown;
       try {
@@ -237,14 +258,86 @@ export class ExtensionBridge {
       } catch {
         return;
       }
-      if (isOwner(msg)) this.ownerPid = msg.pid;
-      clearTimeout(giveUp);
-      done();
+      if (isPeerStatus(msg)) {
+        this.remoteConnected = msg.connected;
+        this.ownerPid = msg.ownerPid;
+        if (!msg.connected) this.failAll("Extension disconnected");
+        return;
+      }
+      this.settle(msg);
     });
-    sock.on("error", () => {
-      clearTimeout(giveUp);
-      done();
-    });
+
+    const dropped = () => {
+      if (this.peerSocket !== sock) return;
+      this.peerSocket = null;
+      this.remoteConnected = false;
+      this.ownerPid = null;
+      this.failAll("The server holding the browser connection went away");
+      this.scheduleRebind(port);
+    };
+    sock.on("close", dropped);
+    sock.on("error", dropped);
+  }
+
+  /** Try to own the port again once the current holder is gone. */
+  private scheduleRebind(port: number): void {
+    if (this.retryTimer) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.start(port);
+    }, WATCH_BIND_MS);
+  }
+
+  /** Tell one peer whether the browser is currently reachable. */
+  private tellPeer(peer: WebSocket): void {
+    try {
+      peer.send(
+        JSON.stringify({
+          type: "peerStatus",
+          connected:
+        this.client?.readyState === 1 ||
+        (this.peerSocket?.readyState === 1 && this.remoteConnected),
+          ownerPid: process.pid,
+        })
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private tellAllPeers(): void {
+    for (const peer of this.peers) this.tellPeer(peer);
+  }
+
+  /** Pass a peer's call to the extension and remember where the answer goes. */
+  private forwardFromPeer(peer: WebSocket, request: BridgeRequest): void {
+    if (!this.client || this.client.readyState !== 1) {
+      try {
+        peer.send(
+          JSON.stringify({ id: request.id, ok: false, error: loadExtensionHint() })
+        );
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    this.peerRoutes.set(request.id, peer);
+    try {
+      this.client.send(JSON.stringify(request));
+    } catch (err) {
+      this.peerRoutes.delete(request.id);
+      try {
+        peer.send(
+          JSON.stringify({
+            id: request.id,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        );
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   stop(): void {
@@ -253,6 +346,12 @@ export class ExtensionBridge {
       this.retryTimer = null;
     }
     this.failAll("Bridge stopped");
+    try {
+      this.peerSocket?.close();
+    } catch {
+      /* ignore */
+    }
+    this.peerSocket = null;
     this.client?.close();
     this.client = null;
     this.wss?.close();
@@ -261,11 +360,17 @@ export class ExtensionBridge {
 
   get status() {
     return {
-      connected: this.client?.readyState === 1,
+      // A peer session reaches the browser through the host, so it is just as
+      // connected as the host is. Reporting otherwise made working sessions
+      // look broken.
+      connected:
+        this.client?.readyState === 1 ||
+        (this.peerSocket?.readyState === 1 && this.remoteConnected),
       connectedAt: this.connectedAt,
       pendingRequests: this.pending.size,
-      waiting: this.waiting,
+      connectedVia: this.peerSocket?.readyState === 1 ? "peer" : "direct",
       ownerPid: this.ownerPid,
+      peers: this.peers.size,
     };
   }
 
@@ -278,19 +383,19 @@ export class ExtensionBridge {
     params: Record<string, unknown> = {},
     timeoutMs: number = REQUEST_TIMEOUT_MS
   ): Promise<unknown> {
-    if (!this.client || this.client.readyState !== 1) {
-      if (this.waiting) {
-        const who = this.ownerPid ? ` (process ${this.ownerPid})` : "";
-        throw new Error(
-          `Another deeporax-browser-mcp server${who} is already connected to Chrome. ` +
-            "Only one can drive the browser at a time. Use that session, or close it " +
-            "and this server will pick the browser up within a few seconds."
-        );
-      }
+    // Either we hold the extension socket, or we work through the server that
+    // does. Both are first class: a peer session is not a degraded one.
+    const viaPeer = this.peerSocket?.readyState === 1;
+    const direct = this.client?.readyState === 1;
+
+    if (!direct && !viaPeer) {
+      throw new Error(loadExtensionHint());
+    }
+    if (viaPeer && !this.remoteConnected) {
       throw new Error(loadExtensionHint());
     }
 
-    const id = `req_${Date.now()}_${++this.seq}`;
+    const id = `req_${process.pid}_${Date.now()}_${++this.seq}`;
     const request: BridgeRequest = { id, method, params };
 
     return new Promise((resolve, reject) => {
@@ -302,7 +407,8 @@ export class ExtensionBridge {
       this.pending.set(id, { resolve, reject, timer });
 
       try {
-        this.client!.send(JSON.stringify(request));
+        const socket = direct ? this.client! : this.peerSocket!;
+        socket.send(JSON.stringify(request));
       } catch (err) {
         clearTimeout(timer);
         this.pending.delete(id);
@@ -333,6 +439,24 @@ export class ExtensionBridge {
       return;
     }
 
+    if (isResponse(msg)) {
+      const peer = this.peerRoutes.get(msg.id);
+      if (peer) {
+        this.peerRoutes.delete(msg.id);
+        try {
+          peer.send(raw);
+        } catch {
+          /* peer went away mid-call */
+        }
+        return;
+      }
+    }
+
+    this.settle(msg);
+  }
+
+  /** Resolve whatever call this response belongs to. */
+  private settle(msg: unknown): void {
     if (!isResponse(msg)) return;
 
     const pending = this.pending.get(msg.id);
