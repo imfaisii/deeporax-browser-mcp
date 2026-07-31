@@ -138,6 +138,7 @@ function isVisible(el: Element): boolean {
 export function buildSnapshot(opts: {
   interestingOnly?: boolean;
   maxDepth?: number;
+  maxElements?: number;
 }): { text: string; refs: Record<string, RefEntry>; url: string; title: string } {
   const interestingOnly = opts.interestingOnly !== false;
   const refs = new Map<string, Element>();
@@ -163,7 +164,12 @@ export function buildSnapshot(opts: {
     return true;
   });
 
-  for (const el of filtered.slice(0, 250)) {
+  // Silently dropping elements makes a snapshot look complete when it is not,
+  // and an agent cannot act on what it was never shown. Cap explicitly and say so.
+  const maxElements = Number(opts.maxElements ?? 250);
+  const shown = filtered.slice(0, maxElements);
+
+  for (const el of shown) {
     const ref = `e${++counter}`;
     refs.set(ref, el);
     const role = roleOf(el);
@@ -185,6 +191,14 @@ export function buildSnapshot(opts: {
     }
     const label = name ? ` "${name.replace(/"/g, '\\"')}"` : "";
     lines.push(`  - ${role}${label} [${ref}]${extra}`);
+  }
+
+  if (filtered.length > shown.length) {
+    lines.push(
+      `  - NOTE: showing ${shown.length} of ${filtered.length} elements. ` +
+        `${filtered.length - shown.length} were left out. ` +
+        "Raise maxElements, or use browser_find to locate a specific element."
+    );
   }
 
   window.__deeporaxRefs = refs;
@@ -338,6 +352,7 @@ export function handleDomMethod(
       return buildSnapshot({
         interestingOnly: params.interestingOnly as boolean | undefined,
         maxDepth: params.maxDepth as number | undefined,
+        maxElements: params.maxElements as number | undefined,
       });
 
     case "click": {

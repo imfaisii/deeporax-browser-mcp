@@ -238,39 +238,199 @@ export async function dragTo(
 }
 
 /**
- * Editing shortcuts, keyed by the letter pressed with the platform's primary
- * modifier.
+ * Editing commands, keyed by the normalised chord.
  *
- * Chrome does not derive these from the keystroke when input arrives over CDP:
- * the page sees the key event, but the browser never runs the corresponding
- * editing command. Naming the command explicitly is what makes Ctrl+A actually
+ * Chrome does not derive these from the keystroke when input arrives over
+ * CDP: the page sees the key event, but the browser never runs the matching
+ * editing command. Naming the command explicitly is what makes Cmd+A actually
  * select instead of quietly doing nothing.
+ *
+ * The two tables differ because the platforms genuinely differ. On macOS Ctrl
+ * carries the emacs bindings and Cmd carries the familiar shortcuts, so
+ * Ctrl+A moves to the start of a paragraph rather than selecting everything.
  */
-const EDIT_COMMANDS: Record<string, string> = {
-  a: "selectAll",
-  z: "undo",
-  "shift+z": "redo",
-  y: "redo",
-  x: "cut",
-  c: "copy",
-  v: "paste",
+const MAC_COMMANDS: Record<string, string> = {
+  "alt+arrowleft": "moveWordLeft",
+  "alt+arrowright": "moveWordRight",
+  "alt+backspace": "deleteWordBackward",
+  "alt+delete": "deleteWordForward",
+  "alt+enter": "insertNewlineIgnoringFieldEditor",
+  "alt+escape": "complete",
+  "alt+kp_enter": "insertNewlineIgnoringFieldEditor",
+  "alt+left": "moveWordLeft",
+  "alt+numpadenter": "insertNewlineIgnoringFieldEditor",
+  "alt+pagedown": "pageDown",
+  "alt+pageup": "pageUp",
+  "alt+right": "moveWordRight",
+  "cmd+a": "selectAll",
+  "cmd+arrowdown": "moveToEndOfDocument",
+  "cmd+arrowleft": "moveToLeftEndOfLine",
+  "cmd+arrowright": "moveToRightEndOfLine",
+  "cmd+arrowup": "moveToBeginningOfDocument",
+  "cmd+backspace": "deleteToBeginningOfLine",
+  "cmd+c": "copy",
+  "cmd+down": "moveToEndOfDocument",
+  "cmd+home": "moveToBeginningOfDocument",
+  "cmd+left": "moveToLeftEndOfLine",
+  "cmd+numpadsubtract": "cancel",
+  "cmd+right": "moveToRightEndOfLine",
+  "cmd+up": "moveToBeginningOfDocument",
+  "cmd+v": "paste",
+  "cmd+x": "cut",
+  "cmd+z": "undo",
+  "ctrl+'": "insertSingleQuoteIgnoringSubstitution",
+  "ctrl+a": "moveToBeginningOfParagraph",
+  "ctrl+arrowdown": "scrollPageDown",
+  "ctrl+arrowleft": "moveToLeftEndOfLine",
+  "ctrl+arrowright": "moveToRightEndOfLine",
+  "ctrl+arrowup": "scrollPageUp",
+  "ctrl+b": "moveBackward",
+  "ctrl+backspace": "deleteBackwardByDecomposingPreviousCharacter",
+  "ctrl+d": "deleteForward",
+  "ctrl+down": "scrollPageDown",
+  "ctrl+e": "moveToEndOfParagraph",
+  "ctrl+enter": "insertLineBreak",
+  "ctrl+f": "moveForward",
+  "ctrl+h": "deleteBackward",
+  "ctrl+k": "deleteToEndOfParagraph",
+  "ctrl+kp_enter": "insertLineBreak",
+  "ctrl+l": "centerSelectionInVisibleArea",
+  "ctrl+left": "moveToLeftEndOfLine",
+  "ctrl+n": "moveDown",
+  "ctrl+numpadenter": "insertLineBreak",
+  "ctrl+p": "moveUp",
+  "ctrl+quote": "insertSingleQuoteIgnoringSubstitution",
+  "ctrl+right": "moveToRightEndOfLine",
+  "ctrl+t": "transpose",
+  "ctrl+tab": "selectNextKeyView",
+  "ctrl+up": "scrollPageUp",
+  "ctrl+v": "moveUp",
+  "ctrl+y": "yank",
+  "shift+arrowdown": "moveDownAndModifySelection",
+  "shift+arrowleft": "moveLeftAndModifySelection",
+  "shift+arrowright": "moveRightAndModifySelection",
+  "shift+arrowup": "moveUpAndModifySelection",
+  "shift+backspace": "deleteBackward",
+  "shift+delete": "deleteForward",
+  "shift+down": "moveDownAndModifySelection",
+  "shift+end": "moveToEndOfDocumentAndModifySelection",
+  "shift+enter": "insertNewline",
+  "shift+escape": "cancelOperation",
+  "shift+f5": "complete",
+  "shift+home": "moveToBeginningOfDocumentAndModifySelection",
+  "shift+left": "moveLeftAndModifySelection",
+  "shift+numpad5": "delete",
+  "shift+pagedown": "pageDownAndModifySelection",
+  "shift+pageup": "pageUpAndModifySelection",
+  "shift+right": "moveRightAndModifySelection",
+  "shift+up": "moveUpAndModifySelection",
+  "ctrl+alt+b": "moveWordBackward",
+  "ctrl+alt+backspace": "deleteWordBackward",
+  "ctrl+alt+f": "moveWordForward",
+  "shift+alt+arrowdown": "moveParagraphForwardAndModifySelection",
+  "shift+alt+arrowleft": "moveWordLeftAndModifySelection",
+  "shift+alt+arrowright": "moveWordRightAndModifySelection",
+  "shift+alt+arrowup": "moveParagraphBackwardAndModifySelection",
+  "shift+alt+backspace": "deleteWordBackward",
+  "shift+alt+delete": "deleteWordForward",
+  "shift+alt+down": "moveParagraphForwardAndModifySelection",
+  "shift+alt+enter": "insertNewlineIgnoringFieldEditor",
+  "shift+alt+escape": "complete",
+  "shift+alt+kp_enter": "insertNewlineIgnoringFieldEditor",
+  "shift+alt+left": "moveWordLeftAndModifySelection",
+  "shift+alt+numpadenter": "insertNewlineIgnoringFieldEditor",
+  "shift+alt+pagedown": "pageDown",
+  "shift+alt+pageup": "pageUp",
+  "shift+alt+right": "moveWordRightAndModifySelection",
+  "shift+alt+up": "moveParagraphBackwardAndModifySelection",
+  "shift+cmd+arrowdown": "moveToEndOfDocumentAndModifySelection",
+  "shift+cmd+arrowleft": "moveToLeftEndOfLineAndModifySelection",
+  "shift+cmd+arrowright": "moveToRightEndOfLineAndModifySelection",
+  "shift+cmd+arrowup": "moveToBeginningOfDocumentAndModifySelection",
+  "shift+cmd+backspace": "deleteToBeginningOfLine",
+  "shift+cmd+numpadsubtract": "cancel",
+  "shift+cmd+z": "redo",
+  "shift+control+kp_enter": "insertLineBreak",
+  "shift+control+numpadenter": "insertLineBreak",
+  "shift+ctrl+'": "insertDoubleQuoteIgnoringSubstitution",
+  "shift+ctrl+a": "moveToBeginningOfParagraphAndModifySelection",
+  "shift+ctrl+arrowdown": "scrollPageDown",
+  "shift+ctrl+arrowleft": "moveToLeftEndOfLineAndModifySelection",
+  "shift+ctrl+arrowright": "moveToRightEndOfLineAndModifySelection",
+  "shift+ctrl+arrowup": "scrollPageUp",
+  "shift+ctrl+b": "moveBackwardAndModifySelection",
+  "shift+ctrl+backspace": "deleteBackwardByDecomposingPreviousCharacter",
+  "shift+ctrl+down": "scrollPageDown",
+  "shift+ctrl+e": "moveToEndOfParagraphAndModifySelection",
+  "shift+ctrl+enter": "insertLineBreak",
+  "shift+ctrl+f": "moveForwardAndModifySelection",
+  "shift+ctrl+left": "moveToLeftEndOfLineAndModifySelection",
+  "shift+ctrl+n": "moveDownAndModifySelection",
+  "shift+ctrl+p": "moveUpAndModifySelection",
+  "shift+ctrl+quote": "insertDoubleQuoteIgnoringSubstitution",
+  "shift+ctrl+right": "moveToRightEndOfLineAndModifySelection",
+  "shift+ctrl+tab": "selectPreviousKeyView",
+  "shift+ctrl+up": "scrollPageUp",
+  "shift+ctrl+v": "pageDownAndModifySelection",
+  "shift+ctrl+alt+b": "moveWordBackwardAndModifySelection",
+  "shift+ctrl+alt+backspace": "deleteWordBackward",
+  "shift+ctrl+alt+f": "moveWordForwardAndModifySelection",
 };
 
-function editingCommand(modifierParts: string[], main: string): string | undefined {
+const WIN_COMMANDS: Record<string, string> = {
+  // Windows and Linux use a different set. Chrome maps Ctrl to the common
+  // editing shortcuts there, where macOS uses Cmd and gives Ctrl the emacs
+  // style bindings above.
+  "ctrl+a": "selectAll",
+  "ctrl+c": "copy",
+  "ctrl+x": "cut",
+  "ctrl+v": "paste",
+  "ctrl+z": "undo",
+  "ctrl+y": "redo",
+  "shift+ctrl+z": "redo",
+  "ctrl+backspace": "deleteWordBackward",
+  "ctrl+delete": "deleteWordForward",
+  "ctrl+arrowleft": "moveWordLeft",
+  "ctrl+arrowright": "moveWordRight",
+  "ctrl+left": "moveWordLeft",
+  "ctrl+right": "moveWordRight",
+  "ctrl+home": "moveToBeginningOfDocument",
+  "ctrl+end": "moveToEndOfDocument",
+  "shift+ctrl+arrowleft": "moveWordLeftAndModifySelection",
+  "shift+ctrl+arrowright": "moveWordRightAndModifySelection",
+  "shift+ctrl+left": "moveWordLeftAndModifySelection",
+  "shift+ctrl+right": "moveWordRightAndModifySelection",
+  "shift+ctrl+home": "moveToBeginningOfDocumentAndModifySelection",
+  "shift+ctrl+end": "moveToEndOfDocumentAndModifySelection",
+};
+
+/** Rewrite a chord into the table's vocabulary: shift, ctrl, alt, cmd. */
+function normaliseChord(modifierParts: string[], main: string): string[] {
   const isMac = navigator.userAgent.includes("Mac");
-  const primary = isMac ? /^(meta|cmd|command)$/i : /^(control|ctrl)$/i;
-  const hasPrimary = modifierParts.some((p) => primary.test(p));
-  if (!hasPrimary) return undefined;
+  const has = (re: RegExp) => modifierParts.some((p) => re.test(p));
 
-  // Any other modifier beyond shift means this is a different shortcut.
-  const extra = modifierParts.filter(
-    (p) => !primary.test(p) && !/^shift$/i.test(p)
-  );
-  if (extra.length) return undefined;
+  const parts: string[] = [];
+  if (has(/^shift$/i)) parts.push("shift");
+  if (has(/^(control|ctrl)$/i)) parts.push("ctrl");
+  if (has(/^(alt|option)$/i)) parts.push("alt");
+  // On Windows and Linux the Meta key is Super, which carries no editing
+  // commands, so only macOS folds it into the table.
+  if (isMac && has(/^(meta|cmd|command)$/i)) parts.push("cmd");
 
-  const shift = modifierParts.some((p) => /^shift$/i.test(p));
+  if (!parts.length) return [];
+
   const key = main.toLowerCase();
-  return EDIT_COMMANDS[shift ? `shift+${key}` : key];
+  // The table lists arrow keys under both spellings.
+  const aliases = key.startsWith("arrow") ? [key, key.slice(5)] : [key];
+  return aliases.map((k) => [...parts, k].join("+"));
+}
+
+function editingCommand(modifierParts: string[], main: string): string | undefined {
+  const table = navigator.userAgent.includes("Mac") ? MAC_COMMANDS : WIN_COMMANDS;
+  for (const chord of normaliseChord(modifierParts, main)) {
+    if (table[chord]) return table[chord];
+  }
+  return undefined;
 }
 
 export async function pressKey(tabId: number, chord: string): Promise<void> {

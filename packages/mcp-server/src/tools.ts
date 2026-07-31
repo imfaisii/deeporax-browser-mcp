@@ -158,6 +158,13 @@ export function registerTools(server: McpServer): void {
     "Capture an accessibility-style snapshot of the page with element refs (e1, e2, ...) for use with click/type. Prefer this over screenshot when you need to interact. The full snapshot is also written under /tmp/deeporax-browser-mcp/snapshots (auto-pruned after 30m).",
     {
       tabId,
+      maxElements: z
+        .number()
+        .int()
+        .min(1)
+        .max(2000)
+        .optional()
+        .describe("Cap on elements listed (default 250). The snapshot says how many were left out."),
       interestingOnly: z
         .boolean()
         .optional()
@@ -341,6 +348,10 @@ export function registerTools(server: McpServer): void {
       ...refOrSelector,
       tabId,
       doubleClick: z.boolean().optional(),
+      tripleClick: z
+        .boolean()
+        .optional()
+        .describe("Triple click, which selects the line or paragraph under the cursor"),
       button: z.enum(["left", "right", "middle"]).optional(),
     },
     async (args) => {
@@ -396,7 +407,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_press_key",
-    "Press a keyboard key (e.g. Enter, Escape, Tab, ArrowDown) or chord (e.g. Control+a) in the focused element. To set a field's text use browser_type, which verifies the result.",
+    "Press a key (Enter, Escape, Tab, ArrowDown) or chord in the focused element. Editing chords run the browser's real editing command, so Cmd+A/Control+A selects, Alt+Backspace deletes a word, and Cmd+Backspace clears to the start of the line. To set a field's text use browser_type, which verifies the result.",
     {
       key: z.string().describe("Key or chord"),
       tabId,
@@ -589,6 +600,10 @@ export function registerTools(server: McpServer): void {
       x: z.number().describe("X in CSS pixels relative to viewport"),
       y: z.number().describe("Y in CSS pixels relative to viewport"),
       doubleClick: z.boolean().optional(),
+      tripleClick: z
+        .boolean()
+        .optional()
+        .describe("Triple click, which selects the line or paragraph under the cursor"),
       button: z.enum(["left", "right", "middle"]).optional(),
     },
     async (args) => {

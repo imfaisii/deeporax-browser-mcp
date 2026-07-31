@@ -93,6 +93,16 @@ async function settle(ms = 160): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * Repeat count for a click. Three clicks select the line or paragraph under
+ * the cursor, which is how a person selects text they mean to replace.
+ */
+function clickCountOf(params: Record<string, unknown>): number {
+  if (params.tripleClick) return 3;
+  if (params.doubleClick) return 2;
+  return 1;
+}
+
 export async function click(
   tabId: number,
   params: Record<string, unknown>
@@ -112,7 +122,7 @@ export async function click(
     { x: target.x, y: target.y },
     {
       button: (params.button as cdp.MouseButton) ?? "left",
-      clickCount: params.doubleClick ? 2 : 1,
+      clickCount: clickCountOf(params),
     }
   );
   await settle();
@@ -170,7 +180,7 @@ export async function clickAtPoint(
     { x, y },
     {
       button: (params.button as cdp.MouseButton) ?? "left",
-      clickCount: params.doubleClick ? 2 : 1,
+      clickCount: clickCountOf(params),
     }
   );
   await settle();
