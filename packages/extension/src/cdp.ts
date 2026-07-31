@@ -598,15 +598,42 @@ export async function evaluate(
 
 // --- Capture ----------------------------------------------------------------
 
+/** Roughly 1MB of image once base64 is decoded; beyond this a capture starts
+ * costing more context than the page is worth. */
+const MAX_SCREENSHOT_CHARS = 1_400_000;
+
 export async function captureScreenshot(
   tabId: number,
-  opts: { fullPage?: boolean } = {}
-): Promise<string> {
-  const res = await send<{ data: string }>(tabId, "Page.captureScreenshot", {
-    format: "png",
-    captureBeyondViewport: Boolean(opts.fullPage),
-  });
-  return res.data;
+  opts: { fullPage?: boolean; format?: "png" | "jpeg"; quality?: number } = {}
+): Promise<{ data: string; format: string; quality?: number; degraded?: boolean }> {
+  const shoot = async (format: "png" | "jpeg", quality?: number) => {
+    const res = await send<{ data: string }>(tabId, "Page.captureScreenshot", {
+      format,
+      captureBeyondViewport: Boolean(opts.fullPage),
+      ...(format === "jpeg" && quality != null
+        ? { quality: Math.round(quality * 100) }
+        : {}),
+    });
+    return res.data;
+  };
+
+  const format = opts.format ?? "jpeg";
+  if (format === "png") {
+    return { data: await shoot("png"), format: "png" };
+  }
+
+  // Step the quality down rather than returning something the caller cannot
+  // afford to read. A full page screenshot of a long article is otherwise
+  // several megabytes of base64 in a single tool result.
+  let quality = opts.quality ?? 0.75;
+  let data = await shoot("jpeg", quality);
+  let degraded = false;
+  while (data.length > MAX_SCREENSHOT_CHARS && quality > 0.15) {
+    quality = Math.max(0.1, quality - 0.15);
+    data = await shoot("jpeg", quality);
+    degraded = true;
+  }
+  return { data, format: "jpeg", quality, degraded };
 }
 
 // --- Lifecycle --------------------------------------------------------------

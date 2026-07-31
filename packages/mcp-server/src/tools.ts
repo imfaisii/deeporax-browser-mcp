@@ -232,6 +232,16 @@ export function registerTools(server: McpServer): void {
     "Take a screenshot of the tab. PNG is saved under /tmp/deeporax-browser-mcp/screenshots (auto-pruned after 30m) and also returned as image content.",
     {
       tabId,
+      format: z
+        .enum(["jpeg", "png"])
+        .optional()
+        .describe("jpeg (default) is compressed to stay readable; png for exact pixels"),
+      quality: z
+        .number()
+        .min(0.1)
+        .max(1)
+        .optional()
+        .describe("JPEG quality 0.1-1, default 0.75. Lowered automatically if the image is too large."),
       fullPage: z
         .boolean()
         .optional()
@@ -243,17 +253,24 @@ export function registerTools(server: McpServer): void {
           "If true, return only the /tmp PNG path (no inline image). Default false."
         ),
     },
-    async ({ tabId: id, persistOnly, fullPage }) => {
+    async ({ tabId: id, persistOnly, fullPage, format, quality }) => {
       try {
-        const result = (await call("screenshot", { tabId: id, fullPage })) as {
+        const result = (await call("screenshot", {
+          tabId: id,
+          fullPage,
+          format,
+          quality,
+        })) as {
           data: string;
           mimeType?: string;
           url?: string;
           title?: string;
+          note?: string;
         };
         const saved = saveScreenshot(result.data, {
           url: result.url,
           title: result.title,
+          mimeType: result.mimeType,
         });
 
         if (persistOnly) {
@@ -269,7 +286,9 @@ export function registerTools(server: McpServer): void {
         const content: ContentItem[] = [
           {
             type: "text",
-            text: `Screenshot of ${result.title ?? "tab"}${result.url ? ` (${result.url})` : ""}\nsaved: ${saved.path} (${saved.bytes} bytes)\ntmp: ${TMP_ROOT}`,
+            text:
+              `Screenshot of ${result.title ?? "tab"}${result.url ? ` (${result.url})` : ""}\nsaved: ${saved.path} (${saved.bytes} bytes)\ntmp: ${TMP_ROOT}` +
+              (result.note ? `\n${result.note}` : ""),
           },
           {
             type: "image",
@@ -786,13 +805,13 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_overlay",
-    "Control the on-page 'Deeporax agent is controlling this tab' overlay (pulsing orange border, status pill, synthetic cursor). The overlay appears automatically during actions; use this to show a custom label, hide it, or resume after the user pressed Stop.",
+    "Set the label on the on-page 'Deeporax agent is controlling this tab' overlay, or read whether the user has pressed Stop. The overlay appears automatically during actions and cannot be hidden from here: it is the user's only indication that a tool is driving their browser, and clearing a Stop is theirs to do, not yours.",
     {
       tabId,
       action: z
-        .enum(["show", "hide", "remove", "resume", "status"])
+        .enum(["show", "status"])
         .default("show")
-        .describe("show = display with label, resume = clear a user Stop"),
+        .describe("show = display with a label, status = report whether the user stopped the agent"),
       label: z
         .string()
         .optional()

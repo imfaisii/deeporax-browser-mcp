@@ -423,10 +423,29 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
       // full page. captureVisibleTab needs an activeTab grant we do not have,
       // which is what made this fail outright.
       if (await cdp.attach(id)) {
-        const data = await cdp.captureScreenshot(id, {
-          fullPage: Boolean(params.fullPage),
-        });
-        return { data, mimeType: "image/png", url: tab.url, title: tab.title };
+        // Our own overlay is real DOM, so it would otherwise appear in the
+        // capture and the agent would spend tokens describing its own UI.
+        await safeDom(id, "overlay", { action: "hide_for_capture" }).catch(() => {});
+        try {
+          const shot = await cdp.captureScreenshot(id, {
+            fullPage: Boolean(params.fullPage),
+            format: params.format === "png" ? "png" : "jpeg",
+            quality: typeof params.quality === "number" ? params.quality : undefined,
+          });
+          return {
+            data: shot.data,
+            mimeType: shot.format === "png" ? "image/png" : "image/jpeg",
+            url: tab.url,
+            title: tab.title,
+            ...(shot.degraded
+              ? {
+                  note: `Compressed to quality ${shot.quality?.toFixed(2)} to stay within a readable size. Pass format:"png" if you need exact pixels.`,
+                }
+              : {}),
+          };
+        } finally {
+          await safeDom(id, "overlay", { action: "restore_after_capture" }).catch(() => {});
+        }
       }
 
       // Fall back to the tabs API, which requires the tab to be visible.

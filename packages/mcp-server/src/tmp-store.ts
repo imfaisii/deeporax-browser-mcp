@@ -105,14 +105,17 @@ export function saveSnapshot(text: string, meta?: { url?: string; title?: string
 }
 
 export function saveScreenshot(
-  base64Png: string,
-  meta?: { url?: string; title?: string }
+  base64Image: string,
+  meta?: { url?: string; title?: string; mimeType?: string }
 ): { path: string; bytes: number } {
   ensureDirs();
   pruneAll();
   const slug = safeSlug(meta?.title || meta?.url);
-  const path = join(SHOT_DIR, `shot-${stamp()}-${slug}.png`);
-  const buf = Buffer.from(base64Png, "base64");
+  // The capture is JPEG unless the caller asked for exact pixels, so the name
+  // has to follow the bytes rather than assume PNG.
+  const ext = meta?.mimeType === "image/png" ? "png" : "jpg";
+  const path = join(SHOT_DIR, `shot-${stamp()}-${slug}.${ext}`);
+  const buf = Buffer.from(base64Image, "base64");
   writeFileSync(path, buf);
   return { path, bytes: buf.length };
 }

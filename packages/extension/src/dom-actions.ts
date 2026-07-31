@@ -6,11 +6,10 @@ import {
   clickPulse,
   cursorToElement,
   describe,
-  hide as hideOverlay,
+  hideForCapture,
   isStopped,
+  restoreAfterCapture,
   moveCursorTo,
-  removeOverlay,
-  resetStop,
   showOverlay,
 } from "./agent-overlay";
 
@@ -103,6 +102,52 @@ const INTERESTING_SELECTOR = [
   "label",
   "img[alt]",
 ].join(",");
+
+/**
+ * Open this element's shadow root, including a closed one.
+ *
+ * A plain `querySelectorAll` stops dead at a shadow boundary, so a page built
+ * from web components looks empty: the agent is told there are no controls
+ * while the user is looking straight at them. `chrome.dom` is available to
+ * extensions only and opens closed roots too, which page script cannot do.
+ */
+function shadowRootOf(el: Element): ShadowRoot | null {
+  if (el.shadowRoot) return el.shadowRoot;
+  // Closed roots live on custom elements, and the dash in the tag name is the
+  // only cheap way to spot one without probing every node on the page.
+  if (!el.tagName.includes("-")) return null;
+  try {
+    return chrome.dom?.openOrClosedShadowRoot?.(el as HTMLElement) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Run a selector across the document and every shadow root beneath it. */
+function queryDeep(selector: string): Element[] {
+  const found: Element[] = [];
+  const stack: Array<Document | ShadowRoot> = [document];
+  const seen = new Set<Document | ShadowRoot>();
+
+  while (stack.length) {
+    const root = stack.pop()!;
+    if (seen.has(root)) continue;
+    seen.add(root);
+
+    found.push(...Array.from(root.querySelectorAll(selector)));
+
+    for (const el of Array.from(root.querySelectorAll("*"))) {
+      const shadow = shadowRootOf(el);
+      if (shadow) stack.push(shadow);
+    }
+  }
+  return found;
+}
+
+/** True when the element lives inside a shadow root rather than the document. */
+function inShadow(el: Element): boolean {
+  return el.getRootNode() !== document;
+}
 
 function cssPath(el: Element): string {
   if (el.id) {
@@ -199,8 +244,8 @@ export function buildSnapshot(opts: {
   lines.push(`  url: ${location.href}`);
 
   const roots = interestingOnly
-    ? Array.from(document.querySelectorAll(INTERESTING_SELECTOR)).filter(isVisible)
-    : Array.from(document.body?.querySelectorAll("*") || []).filter(isVisible).slice(0, 400);
+    ? queryDeep(INTERESTING_SELECTOR).filter(isVisible)
+    : queryDeep("*").filter(isVisible).slice(0, 400);
 
   // Deduplicate nested interesting nodes: keep outermost when parent also interesting
   const set = new Set(roots);
@@ -222,7 +267,8 @@ export function buildSnapshot(opts: {
     const ref = refFor(el);
     const role = roleOf(el);
     const name = nameOf(el);
-    const selector = cssPath(el);
+    const shadowed = inShadow(el);
+    const selector = shadowed ? "" : cssPath(el);
     refMeta[ref] = { selector, role, name };
 
     let extra = "";
@@ -231,12 +277,22 @@ export function buildSnapshot(opts: {
     }
     if (el instanceof HTMLInputElement) {
       extra += ` inputType="${el.type}"`;
-      if (el.value && el.type !== "password") extra += ` value="${el.value.slice(0, 40)}"`;
+      // Checking only for type=password missed hidden inputs, which carry CSRF
+      // and session tokens, and every field a site marks as a one-time code or
+      // card number. The snapshot goes straight to the model, so use the same
+      // test the write path uses.
+      if (el.value) {
+        extra += isSecretField(el)
+          ? ` value="[redacted, ${el.value.length} chars]"`
+          : ` value="${el.value.slice(0, 40)}"`;
+      }
       if (el.checked) extra += ` checked`;
     }
     if (el instanceof HTMLSelectElement) {
       extra += ` value="${el.value}"`;
     }
+    // Say so explicitly: a selector will not reach this one, only the ref will.
+    if (shadowed) extra += " inShadowDom";
     const label = name ? ` "${name.replace(/"/g, '\\"')}"` : "";
     lines.push(`  - ${role}${label} [${ref}]${extra}`);
   }
@@ -284,7 +340,7 @@ function resolveEl(params: Record<string, unknown>): Element {
         `Unknown or stale ref "${ref}". Run browser_snapshot again and use a fresh ref.`
       );
     }
-    if (!document.contains(el)) {
+    if (!el.isConnected) {
       throw new Error(
         `Ref "${ref}" points at an element the page has since removed. Run browser_snapshot again and use a fresh ref.`
       );
@@ -617,7 +673,7 @@ export function handleDomMethod(
       if (refs && refs.size) {
         for (const [ref, weak] of refs) {
           const el = weak.deref();
-          if (!el || !document.contains(el)) continue;
+          if (!el || !el.isConnected) continue;
           const role = roleOf(el);
           const name = nameOf(el);
           const text = ((el as HTMLElement).innerText || el.textContent || "").replace(/\s+/g, " ").trim();
@@ -628,7 +684,7 @@ export function handleDomMethod(
               ref,
               role,
               name,
-              selector: cssPath(el),
+              selector: inShadow(el) ? "" : cssPath(el),
               text: text.slice(0, 160),
             });
           }
@@ -1129,21 +1185,23 @@ export async function handleDomMethodAsync(
 
   if (method === "overlay") {
     const action = String(params.action ?? "show");
-    if (action === "hide") {
-      hideOverlay();
-      return { ok: true, overlay: "hidden" };
-    }
-    if (action === "remove") {
-      removeOverlay();
-      return { ok: true, overlay: "removed" };
-    }
-    if (action === "resume") {
-      resetStop();
-      showOverlay("resumed control");
-      return { ok: true, overlay: "resumed" };
+    if (action === "resume" || action === "hide" || action === "remove") {
+      return {
+        ok: false,
+        reason:
+          "The overlay is the user's indication that a tool is driving their browser, so it cannot be hidden or reset from a tool call. Only the person at the keyboard can clear a Stop.",
+      };
     }
     if (action === "status") {
       return { stopped: isStopped() };
+    }
+    if (action === "hide_for_capture") {
+      hideForCapture();
+      return { ok: true, overlay: "hidden_for_capture" };
+    }
+    if (action === "restore_after_capture") {
+      restoreAfterCapture();
+      return { ok: true, overlay: "restored" };
     }
     showOverlay(String(params.label ?? "is controlling this tab"));
     return { ok: true, overlay: "shown" };

@@ -88,6 +88,38 @@ async function readState(
   }
 }
 
+/**
+ * Where the tab is right now.
+ *
+ * Resolving an element and then dispatching input are two separate trips into
+ * the page, and a redirect can land between them. Without this check a click
+ * aimed at one site is delivered to whatever replaced it, and the result still
+ * says ok. Typing is the dangerous case: text meant for one origin should never
+ * be committed to another.
+ */
+async function originOf(tabId: number): Promise<string> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return new URL(tab.url ?? "").origin;
+  } catch {
+    return "";
+  }
+}
+
+async function assertSameOrigin(
+  tabId: number,
+  expected: string,
+  action: string
+): Promise<void> {
+  const now = await originOf(tabId);
+  if (expected && now && now !== expected) {
+    throw new Error(
+      `The tab navigated from ${expected} to ${now} while preparing to ${action}, ` +
+        "so nothing was sent. Take a fresh browser_snapshot and decide again on the page that is actually open."
+    );
+  }
+}
+
 /** Give the page a moment to react before diffing state. */
 async function settle(ms = 160): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
@@ -107,6 +139,7 @@ export async function click(
   tabId: number,
   params: Record<string, unknown>
 ): Promise<InteractionOutcome> {
+  const origin = await originOf(tabId);
   const target = await resolveTarget(tabId, params);
 
   if (target.covered) {
@@ -117,6 +150,7 @@ export async function click(
   }
 
   const before = target.state;
+  await assertSameOrigin(tabId, origin, "click");
   await cdp.clickAt(
     tabId,
     { x: target.x, y: target.y },
@@ -218,8 +252,17 @@ export async function type(
   tabId: number,
   params: Record<string, unknown>
 ): Promise<InteractionOutcome> {
+  const origin = await originOf(tabId);
+  const expected = params.expectedOrigin ? String(params.expectedOrigin) : "";
+  if (expected && origin && expected !== origin) {
+    throw new Error(
+      `This text was meant for ${expected} but the tab is on ${origin}, so nothing was typed.`
+    );
+  }
+
   const target = await resolveTarget(tabId, params);
 
+  await assertSameOrigin(tabId, origin, "type");
   await cdp.clickAt(tabId, { x: target.x, y: target.y });
   await settle(80);
 

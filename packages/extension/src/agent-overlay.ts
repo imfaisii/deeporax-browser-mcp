@@ -295,6 +295,30 @@ export function hide(): void {
   state.cursor.classList.remove("on");
 }
 
+/**
+ * Take the overlay out of the picture while a tool acts.
+ *
+ * It is real DOM: it lands in screenshots, it shows up in a hit test, and the
+ * agent can end up clicking our own Stop button. Visibility is stashed so the
+ * page looks the same afterwards.
+ */
+let hiddenForCapture: { frame: boolean; pill: boolean } | null = null;
+
+export function hideForCapture(): void {
+  if (!state || hiddenForCapture) return;
+  hiddenForCapture = {
+    frame: state.frame.classList.contains("on"),
+    pill: state.pill.classList.contains("on"),
+  };
+  state.host.style.display = "none";
+}
+
+export function restoreAfterCapture(): void {
+  if (!state || !hiddenForCapture) return;
+  state.host.style.display = "";
+  hiddenForCapture = null;
+}
+
 export function isStopped(): boolean {
   return stopped;
 }

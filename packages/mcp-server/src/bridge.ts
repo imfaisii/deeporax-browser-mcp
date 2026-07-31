@@ -52,11 +52,37 @@ export class ExtensionBridge {
       console.error(`[deeporax-browser-mcp] bridge listening on ws://127.0.0.1:${port}`);
     });
 
-    this.wss.on("connection", (socket) => {
+    this.wss.on("connection", (socket, req) => {
       // A new socket is on probation until it identifies itself. Another
       // server probing this port is also a connection, and adopting it as the
       // extension would drop the real one: that alone produced a disconnect
       // every few seconds while a second session was retrying.
+      // Only the extension may hold this socket.
+      //
+      // The port is on loopback, which is not an access control: a WebSocket is
+      // exempt from CORS, so any page the user visits can open this port. Saying
+      // hello is no barrier either, since the handshake carries no secret. What a
+      // page cannot do is forge its Origin, and the extension's is always
+      // chrome-extension://. Without this check a hostile page could take the
+      // socket, receive the agent's tool requests, and answer them with invented
+      // page content that the agent would then act on.
+      // A browser always sends Origin and cannot fake it; a local process (a
+      // peer server probing this port) sends none. So an Origin that is present
+      // and is not the extension's means a web page is calling, and only that
+      // case is refused.
+      const origin = String(req.headers.origin ?? "");
+      if (origin && !origin.startsWith("chrome-extension://")) {
+        console.error(
+          `[deeporax-browser-mcp] refused a bridge connection from ${origin || "an unidentified origin"}`
+        );
+        try {
+          socket.close(4003, "only the browser extension may connect");
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+
       let adopted = false;
 
       const adopt = () => {
