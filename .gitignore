@@ -39,7 +39,6 @@ Desktop.ini
 
 # Editors / IDEs
 .idea/
-.vscode/
 *.swp
 *.swo
 *~
@@ -55,3 +54,7 @@ deeporax-browser-mcp-extension-*.zip
 
 # Bug reports written while testing; kept locally, not part of the package
 BUG-REPORT-*.md
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
