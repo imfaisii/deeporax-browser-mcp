@@ -194,7 +194,15 @@ export class ExtensionBridge {
     };
   }
 
-  async call(method: string, params: Record<string, unknown> = {}): Promise<unknown> {
+  /**
+   * `timeoutMs` exists because batch calls do real work per field. A single
+   * fixed budget either cuts long batches off partway or hides a hung tab.
+   */
+  async call(
+    method: string,
+    params: Record<string, unknown> = {},
+    timeoutMs: number = REQUEST_TIMEOUT_MS
+  ): Promise<unknown> {
     if (!this.client || this.client.readyState !== 1) {
       if (this.standby) {
         throw new Error(
@@ -212,8 +220,8 @@ export class ExtensionBridge {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Timed out waiting for extension response to "${method}" (${REQUEST_TIMEOUT_MS}ms)`));
-      }, REQUEST_TIMEOUT_MS);
+        reject(new Error(`Timed out waiting for extension response to "${method}" (${timeoutMs}ms)`));
+      }, timeoutMs);
 
       this.pending.set(id, { resolve, reject, timer });
 

@@ -234,6 +234,79 @@ function resolveEl(params: Record<string, unknown>): Element {
   throw new Error("Provide either ref (from snapshot) or selector");
 }
 
+/** Input types that hold no editable text, so writing to them is a mistake. */
+const NON_TEXT_INPUT = new Set([
+  "checkbox",
+  "radio",
+  "file",
+  "button",
+  "submit",
+  "reset",
+  "image",
+  "range",
+  "color",
+]);
+
+function isEditable(node: Element | null): node is HTMLElement {
+  if (!node) return false;
+  if (node instanceof HTMLInputElement) {
+    return !NON_TEXT_INPUT.has((node.type || "text").toLowerCase());
+  }
+  if (node instanceof HTMLTextAreaElement) return true;
+  return (node as HTMLElement).isContentEditable === true;
+}
+
+/**
+ * Find the element that actually holds the text.
+ *
+ * A snapshot ref often points at a wrapper: component libraries render a
+ * decorated container around a plain <input>, and clicking the container is
+ * what moves focus to the real field. Writing to the wrapper would silently do
+ * nothing, so follow focus or the first editable descendant instead.
+ */
+function editableTarget(el: Element): HTMLElement {
+  if (isEditable(el)) return el;
+
+  const active = document.activeElement;
+  if (isEditable(active) && el.contains(active)) return active;
+
+  const inner = el.querySelector<HTMLElement>(
+    'input, textarea, [contenteditable=""], [contenteditable="true"]'
+  );
+  if (isEditable(inner)) return inner;
+
+  // Focus may have moved into a portal rendered outside this subtree.
+  if (isEditable(active)) return active;
+
+  throw new Error(
+    `<${el.tagName.toLowerCase()}> is not a text field and contains no editable input.`
+  );
+}
+
+function fieldValue(el: Element): string {
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    return el.value;
+  }
+  return (el as HTMLElement).innerText ?? el.textContent ?? "";
+}
+
+function selectWholeField(el: HTMLElement): number {
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+    try {
+      el.select();
+    } catch {
+      // Some input types refuse programmatic selection; the caller verifies.
+    }
+    return el.value.length;
+  }
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const sel = window.getSelection();
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+  return (el.innerText ?? "").length;
+}
+
 function dispatchKey(el: Element, key: string) {
   const parts = key.split("+");
   const main = parts[parts.length - 1]!;
@@ -788,6 +861,105 @@ export function handleDomMethod(
         }
       }
       return { found: false };
+    }
+
+    /**
+     * Read everything needed to decide whether a text write succeeded.
+     *
+     * The caller compares `value` against what it asked for, so this is the
+     * single source of truth for the verification loop.
+     */
+    case "field_probe": {
+      const el = editableTarget(resolveEl(params));
+      const anyEl = el as HTMLInputElement | HTMLTextAreaElement;
+      const contentEditable = (el as HTMLElement).isContentEditable;
+      const max = Number(anyEl.maxLength ?? -1);
+      return {
+        kind: contentEditable
+          ? "contenteditable"
+          : el.tagName.toLowerCase() === "textarea"
+            ? "textarea"
+            : "input",
+        value: fieldValue(el),
+        // maxLength is -1 when unset; normalise so callers can test > 0.
+        maxLength: Number.isFinite(max) && max > 0 ? max : 0,
+        readOnly: Boolean(anyEl.readOnly),
+        disabled: Boolean(anyEl.disabled) || el.getAttribute("aria-disabled") === "true",
+        inputType: (anyEl.type || "").toLowerCase(),
+        ariaInvalid: el.getAttribute("aria-invalid") ?? "",
+        valid: anyEl.validity ? anyEl.validity.valid : true,
+        focused: document.activeElement === el,
+        tag: el.tagName.toLowerCase(),
+      };
+    }
+
+    /**
+     * Select the whole field so the next trusted keystroke replaces it.
+     *
+     * This is a DOM selection rather than a Ctrl+A keystroke on purpose. A
+     * modified key event reaches the page but Chrome does not turn it into
+     * the built-in selectAll editing command, so the selection never happened
+     * and typed text landed at the caret. A real Selection is honoured by the
+     * editing pipeline regardless of platform or key bindings.
+     */
+    case "field_select_all": {
+      const el = editableTarget(resolveEl(params));
+      (el as HTMLElement).focus();
+      const length = selectWholeField(el);
+      return { ok: true, length, tag: el.tagName.toLowerCase() };
+    }
+
+    /** Put the caret after the existing content, for append. */
+    case "field_caret_end": {
+      const el = editableTarget(resolveEl(params));
+      (el as HTMLElement).focus();
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        const end = el.value.length;
+        try {
+          el.setSelectionRange(end, end);
+        } catch {
+          // Selection is not supported on number/email/date inputs.
+        }
+      } else {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+      return { ok: true };
+    }
+
+    /**
+     * Last resort: write the value directly and announce it.
+     *
+     * Goes through the prototype's own setter so a framework that wraps the
+     * property (React installs a value tracker) still sees a change. This is
+     * not a trusted event, so the caller reports it as such.
+     */
+    case "field_force_set": {
+      const el = editableTarget(resolveEl(params));
+      const text = String(params.text ?? "");
+      (el as HTMLElement).focus();
+
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        const proto =
+          el instanceof HTMLTextAreaElement
+            ? HTMLTextAreaElement.prototype
+            : HTMLInputElement.prototype;
+        const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
+        if (setter) setter.call(el, text);
+        else el.value = text;
+      } else {
+        el.textContent = text;
+      }
+
+      el.dispatchEvent(
+        new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" })
+      );
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return { ok: true, value: fieldValue(el) };
     }
 
     /** Just the state string, for the before/after diff. */

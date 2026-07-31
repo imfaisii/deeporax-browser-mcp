@@ -11,6 +11,10 @@
  * unconditional `ok: true`.
  */
 import * as cdp from "./cdp";
+import { dom as domCall } from "./dom-channel";
+import { setText } from "./text-entry";
+
+export { useDomChannel } from "./dom-channel";
 
 export type InteractionOutcome = {
   ok: boolean;
@@ -44,20 +48,6 @@ export type Target = {
  * does not exist. The background passes in the caller so we stay decoupled
  * from how the DOM channel is implemented.
  */
-type DomCaller = (
-  tabId: number,
-  method: string,
-  params: Record<string, unknown>
-) => Promise<unknown>;
-
-let domCall: DomCaller = async () => {
-  throw new Error("interaction layer not initialised");
-};
-
-export function useDomChannel(fn: DomCaller): void {
-  domCall = fn;
-}
-
 async function resolveTarget(
   tabId: number,
   params: Record<string, unknown>
@@ -205,51 +195,44 @@ export async function hover(
   return { ok: true, trusted: true, tag: target.tag, text: target.text };
 }
 
+/**
+ * Write text into a field and confirm the field holds it.
+ *
+ * The write itself lives in text-entry, which escalates through techniques
+ * until a read-back agrees with what was asked for. Here we only supply the
+ * trusted focus click, since clicking is what makes component libraries set up
+ * their own editing state, and a failed write is raised rather than returned
+ * so it cannot be mistaken for success.
+ */
 export async function type(
   tabId: number,
   params: Record<string, unknown>
 ): Promise<InteractionOutcome> {
-  const text = String(params.text ?? "");
-  const append = Boolean(params.append);
   const target = await resolveTarget(tabId, params);
-  const before = target.state;
 
-  // Focus by clicking the field: this is what a person does, and it lets
-  // component libraries run their own focus handling.
   await cdp.clickAt(tabId, { x: target.x, y: target.y });
   await settle(80);
 
-  if (!append) {
-    await cdp.selectAll(tabId);
-    await cdp.pressKey(tabId, "Delete");
-  }
+  const result = await setText(tabId, params);
 
-  if (params.slowly) {
-    await cdp.typeSlowly(tabId, text);
-  } else {
-    await cdp.insertText(tabId, text);
+  if (!result.ok) {
+    throw new Error(result.warning ?? "The field did not accept this value.");
   }
 
   if (params.submit) {
     await cdp.pressKey(tabId, "Enter");
+    await settle(250);
   }
 
-  await settle();
-  const after = await readState(tabId, params);
-  const changed = after !== null && after !== before;
+  return { ...result, tag: target.tag };
+}
 
-  const outcome: InteractionOutcome = {
-    ok: true,
-    trusted: true,
-    changed,
-    typed: text.length,
-    tag: target.tag,
-  };
-  if (!changed && after !== null) {
-    outcome.warning =
-      "Text was delivered but the field's value did not change. It may be read-only or managed by a framework that rejected the input.";
-  }
-  return outcome;
+/** Empty a field, verified the same way as a write. */
+export async function clear(
+  tabId: number,
+  params: Record<string, unknown>
+): Promise<InteractionOutcome> {
+  return type(tabId, { ...params, text: "", append: false });
 }
 
 export async function pressKey(
@@ -349,25 +332,55 @@ export async function fillForm(
     (params.fields as Array<{ ref?: string; selector?: string; value: string }>) ?? [];
   if (!fields.length) throw new Error("fields[] is required");
 
+  // One bad field must not hide the outcome of the others, so each is
+  // reported on its own and the run continues.
   const results: unknown[] = [];
+  let failed = 0;
+
   for (const field of fields) {
-    const res = await type(tabId, {
-      ref: field.ref,
-      selector: field.selector,
-      text: field.value,
-    });
-    results.push({
-      ref: field.ref,
-      selector: field.selector,
-      changed: res.changed,
-      warning: res.warning,
-    });
+    const where = field.ref ?? field.selector;
+    try {
+      const res = await type(tabId, {
+        ref: field.ref,
+        selector: field.selector,
+        text: field.value,
+      });
+      results.push({
+        field: where,
+        ok: true,
+        value: res.value,
+        match: res.match,
+        warning: res.warning,
+      });
+    } catch (err) {
+      failed++;
+      results.push({
+        field: where,
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
-  if (params.submit) {
+  if (params.submit && !failed) {
     await cdp.pressKey(tabId, "Enter");
     await settle(250);
   }
 
-  return { ok: true, trusted: true, fields: results };
+  const outcome: InteractionOutcome = {
+    ok: failed === 0,
+    trusted: true,
+    filled: fields.length - failed,
+    failed,
+    fields: results,
+  };
+  if (failed) {
+    outcome.warning =
+      `${failed} of ${fields.length} fields did not end up with the requested value. ` +
+      (params.submit
+        ? "The form was not submitted, so nothing was sent with the wrong values. "
+        : "") +
+      "See the per-field results below and fix those before submitting.";
+  }
+  return outcome;
 }

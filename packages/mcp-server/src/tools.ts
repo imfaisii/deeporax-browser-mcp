@@ -22,8 +22,12 @@ function errorResult(err: unknown) {
   };
 }
 
-async function call(method: string, params: Record<string, unknown> = {}) {
-  return bridge.call(method, params);
+async function call(
+  method: string,
+  params: Record<string, unknown> = {},
+  timeoutMs?: number
+) {
+  return bridge.call(method, params, timeoutMs);
 }
 
 const tabId = z
@@ -350,7 +354,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_type",
-    "Type text into an input/textarea/contenteditable by ref or selector. Clears existing value unless append is true.",
+    "Set the text of an input/textarea/contenteditable by ref or selector. Replaces the existing value unless append is true. The field is read back afterwards and the call fails if it does not hold the requested value, so a success means the value is really there.",
     {
       ...refOrSelector,
       text: z.string().describe("Text to type"),
@@ -378,8 +382,21 @@ export function registerTools(server: McpServer): void {
   );
 
   server.tool(
+    "browser_clear",
+    "Empty a text field by ref or selector. The field is read back afterwards, so this fails loudly rather than leaving stale text behind.",
+    { ...refOrSelector, tabId },
+    async (args) => {
+      try {
+        return textResult(await call("clear", args));
+      } catch (err) {
+        return errorResult(err);
+      }
+    }
+  );
+
+  server.tool(
     "browser_press_key",
-    "Press a keyboard key (e.g. Enter, Escape, Tab, ArrowDown) or chord (e.g. Control+a).",
+    "Press a keyboard key (e.g. Enter, Escape, Tab, ArrowDown) or chord (e.g. Control+a) in the focused element. To set a field's text use browser_type, which verifies the result.",
     {
       key: z.string().describe("Key or chord"),
       tabId,
@@ -518,7 +535,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_fill_form",
-    "Fill multiple fields at once. Each field needs ref or selector plus value.",
+    "Fill multiple fields at once. Each field needs ref or selector plus value. Every field is read back after writing, and the per-field results say which ones took the value. If any field fails the form is not submitted.",
     {
       tabId,
       fields: z
@@ -534,7 +551,9 @@ export function registerTools(server: McpServer): void {
     },
     async (args) => {
       try {
-        return textResult(await call("fill_form", args));
+        // 15s of headroom per field: each one is written and then verified.
+        const budget = 20_000 + args.fields.length * 15_000;
+        return textResult(await call("fill_form", args, budget));
       } catch (err) {
         return errorResult(err);
       }

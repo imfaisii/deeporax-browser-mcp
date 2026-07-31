@@ -296,7 +296,11 @@ async function safeDom(
     // A page-level rejection ("stale ref", "no element matches selector") is
     // the answer, not a transport problem. Retrying via injection would only
     // reproduce it and bury the useful text.
-    if (/stale|Unknown or stale|No element matches|not a <select>|zero size|Provide either/i.test(a)) {
+    if (
+      /stale|Unknown or stale|No element matches|not a <select>|not a text field|zero size|Provide either/i.test(
+        a
+      )
+    ) {
       throw primary instanceof Error ? primary : new Error(a);
     }
 
@@ -455,6 +459,7 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
     case "click":
     case "click_xy":
     case "type":
+    case "clear":
     case "press_key":
     case "hover":
     case "drag":
@@ -480,6 +485,8 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
           return await interact.clickAtPoint(id, params);
         case "type":
           return await interact.type(id, params);
+        case "clear":
+          return await interact.clear(id, params);
         case "press_key":
           return await interact.pressKey(id, params);
         case "hover":
@@ -526,6 +533,10 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
     case "overlay":
     case "resolve_target":
     case "element_state":
+    case "field_probe":
+    case "field_select_all":
+    case "field_caret_end":
+    case "field_force_set":
     case "select_option_native":
     case "find_option":
     case "dialogs": {

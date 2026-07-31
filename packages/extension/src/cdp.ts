@@ -237,11 +237,49 @@ export async function dragTo(
   });
 }
 
+/**
+ * Editing shortcuts, keyed by the letter pressed with the platform's primary
+ * modifier.
+ *
+ * Chrome does not derive these from the keystroke when input arrives over CDP:
+ * the page sees the key event, but the browser never runs the corresponding
+ * editing command. Naming the command explicitly is what makes Ctrl+A actually
+ * select instead of quietly doing nothing.
+ */
+const EDIT_COMMANDS: Record<string, string> = {
+  a: "selectAll",
+  z: "undo",
+  "shift+z": "redo",
+  y: "redo",
+  x: "cut",
+  c: "copy",
+  v: "paste",
+};
+
+function editingCommand(modifierParts: string[], main: string): string | undefined {
+  const isMac = navigator.userAgent.includes("Mac");
+  const primary = isMac ? /^(meta|cmd|command)$/i : /^(control|ctrl)$/i;
+  const hasPrimary = modifierParts.some((p) => primary.test(p));
+  if (!hasPrimary) return undefined;
+
+  // Any other modifier beyond shift means this is a different shortcut.
+  const extra = modifierParts.filter(
+    (p) => !primary.test(p) && !/^shift$/i.test(p)
+  );
+  if (extra.length) return undefined;
+
+  const shift = modifierParts.some((p) => /^shift$/i.test(p));
+  const key = main.toLowerCase();
+  return EDIT_COMMANDS[shift ? `shift+${key}` : key];
+}
+
 export async function pressKey(tabId: number, chord: string): Promise<void> {
   const parts = chord.split("+");
   const main = parts[parts.length - 1] ?? "";
-  const modifiers = modifierMask(parts.slice(0, -1));
+  const modifierParts = parts.slice(0, -1);
+  const modifiers = modifierMask(modifierParts);
   const info = describeKey(main);
+  const command = editingCommand(modifierParts, main);
 
   // A modified key must not deliver text, otherwise Ctrl+A types "a".
   const text = modifiers === 0 || modifiers === 8 ? info.text : undefined;
@@ -255,6 +293,7 @@ export async function pressKey(tabId: number, chord: string): Promise<void> {
     modifiers,
     text,
     unmodifiedText: text,
+    ...(command ? { commands: [command] } : {}),
   });
   await send(tabId, "Input.dispatchKeyEvent", {
     type: "keyUp",
@@ -276,12 +315,6 @@ export async function typeSlowly(tabId: number, text: string): Promise<void> {
   for (const ch of text) {
     await pressKey(tabId, ch);
   }
-}
-
-/** Select the focused field's contents so typing replaces rather than appends. */
-export async function selectAll(tabId: number): Promise<void> {
-  const isMac = navigator.userAgent.includes("Mac");
-  await pressKey(tabId, isMac ? "Meta+a" : "Control+a");
 }
 
 // --- Scripting --------------------------------------------------------------
