@@ -52,3 +52,6 @@ tmp/
 temp/
 *.tmp
 deeporax-browser-mcp-extension-*.zip
+
+# Bug reports written while testing; kept locally, not part of the package
+BUG-REPORT-*.md
