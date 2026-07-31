@@ -197,6 +197,20 @@ export function buildSnapshot(opts: {
   };
 }
 
+/** Values a click or keystroke is expected to move. */
+function elementState(el: Element): string {
+  const anyEl = el as HTMLElement & { checked?: boolean; value?: string };
+  return [
+    `checked=${el.getAttribute("aria-checked") ?? (anyEl.checked != null ? String(anyEl.checked) : "")}`,
+    `selected=${el.getAttribute("aria-selected") ?? ""}`,
+    `expanded=${el.getAttribute("aria-expanded") ?? ""}`,
+    `pressed=${el.getAttribute("aria-pressed") ?? ""}`,
+    `value=${anyEl.value != null ? String(anyEl.value).slice(0, 80) : ""}`,
+    `class=${typeof el.className === "string" ? el.className : ""}`,
+    `focused=${document.activeElement === el}`,
+  ].join("|");
+}
+
 function resolveEl(params: Record<string, unknown>): Element {
   const ref = params.ref as string | undefined;
   const selector = params.selector as string | undefined;
@@ -671,6 +685,118 @@ export function handleDomMethod(
         policy: w.__deeporaxDialogPolicy,
         recent: (w.__deeporaxDialogs || []).slice(-10),
       };
+    }
+
+    /**
+     * Resolve a target's viewport geometry and observable state.
+     *
+     * This has to run in the isolated world because that is where the
+     * snapshot stores its ref map. The background then feeds these
+     * coordinates to CDP, which delivers a trusted click.
+     */
+    case "resolve_target": {
+      const el = resolveEl(params) as HTMLElement;
+      el.scrollIntoView({ block: "center", inline: "center" });
+
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) {
+        throw new Error(
+          `Element ${params.ref ?? params.selector} has zero size, so it cannot be clicked. It may be hidden.`
+        );
+      }
+
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+
+      // Anything painted on top would swallow the click.
+      const top = document.elementFromPoint(cx, cy);
+      let covered = false;
+      let coveredBy = "";
+      if (top && top !== el && !el.contains(top) && !top.contains(el)) {
+        covered = true;
+        const cls =
+          typeof top.className === "string" && top.className
+            ? "." + top.className.split(" ")[0]
+            : "";
+        coveredBy = top.tagName.toLowerCase() + cls;
+      }
+
+      return {
+        x: cx,
+        y: cy,
+        width: r.width,
+        height: r.height,
+        tag: el.tagName.toLowerCase(),
+        text: ((el as HTMLElement).innerText || el.textContent || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 80),
+        state: elementState(el),
+        covered,
+        coveredBy,
+      };
+    }
+
+    /** Native <select>: CDP cannot drive an OS-drawn popup, so set it here. */
+    case "select_option_native": {
+      const el = resolveEl(params);
+      if (!(el instanceof HTMLSelectElement)) {
+        return { ok: false, reason: "Element is not a <select>" };
+      }
+      const values = (params.values as string[]) ?? [];
+      const matched: string[] = [];
+      for (const opt of Array.from(el.options)) {
+        const hit =
+          values.includes(opt.value) ||
+          values.includes((opt.textContent ?? "").trim());
+        opt.selected = hit;
+        if (hit) matched.push(opt.value);
+      }
+      if (!matched.length) {
+        return {
+          ok: false,
+          reason: `None of ${JSON.stringify(values)} matched an option`,
+        };
+      }
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return { ok: true, matched, value: el.value };
+    }
+
+    /** Locate an open dropdown's option so the caller can click it for real. */
+    case "find_option": {
+      const wanted = String(params.text ?? "");
+      const nodes = document.querySelectorAll(
+        '[role="option"], [role="menuitem"], li, material-select-item, option'
+      );
+      for (const n of Array.from(nodes)) {
+        const t = ((n as HTMLElement).innerText || n.textContent || "")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (t === wanted || t.includes(wanted)) {
+          let r = n.getBoundingClientRect();
+          if (r.width > 0 && r.height > 0) {
+            n.scrollIntoView({ block: "center" });
+            r = n.getBoundingClientRect();
+            return {
+              found: true,
+              x: r.left + r.width / 2,
+              y: r.top + r.height / 2,
+              text: t,
+            };
+          }
+        }
+      }
+      return { found: false };
+    }
+
+    /** Just the state string, for the before/after diff. */
+    case "element_state": {
+      try {
+        return { state: elementState(resolveEl(params)) };
+      } catch {
+        return { state: null };
+      }
     }
 
     case "dialogs": {

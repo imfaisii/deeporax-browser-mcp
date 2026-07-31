@@ -30,7 +30,10 @@ const tabId = z
   .number()
   .int()
   .optional()
-  .describe("Chrome tab id. Defaults to the active tab in the last focused window.");
+  .describe(
+    "Chrome tab id. Defaults to the tab this session last navigated to or acted on, " +
+      "so a sequence of calls stays on one tab."
+  );
 
 const refOrSelector = {
   ref: z
@@ -216,9 +219,13 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_screenshot",
-    "Take a screenshot of the visible tab viewport. PNG is saved under /tmp/deeporax-browser-mcp/screenshots (auto-pruned after 30m) and also returned as image content.",
+    "Take a screenshot of the tab. PNG is saved under /tmp/deeporax-browser-mcp/screenshots (auto-pruned after 30m) and also returned as image content.",
     {
       tabId,
+      fullPage: z
+        .boolean()
+        .optional()
+        .describe("Capture the entire scrollable page rather than just the viewport."),
       persistOnly: z
         .boolean()
         .optional()
@@ -226,9 +233,9 @@ export function registerTools(server: McpServer): void {
           "If true, return only the /tmp PNG path (no inline image). Default false."
         ),
     },
-    async ({ tabId: id, persistOnly }) => {
+    async ({ tabId: id, persistOnly, fullPage }) => {
       try {
-        const result = (await call("screenshot", { tabId: id })) as {
+        const result = (await call("screenshot", { tabId: id, fullPage })) as {
           data: string;
           mimeType?: string;
           url?: string;
@@ -464,7 +471,10 @@ export function registerTools(server: McpServer): void {
     {
       script: z
         .string()
-        .describe("JS expression or function body. Use `document` / `window` freely."),
+        .describe(
+          "JS expression or function body, evaluated in the page's main world. " +
+            "Returns the real value; a thrown page error becomes a tool error."
+        ),
       tabId,
     },
     async ({ script, tabId: id }) => {

@@ -1,5 +1,7 @@
 import { DEFAULT_PORT, PROTOCOL_VERSION, isRequest, type BridgeRequest, type BridgeResponse } from "./protocol";
 import { MAIN_WORLD_HOOKS } from "./page-hooks";
+import * as cdp from "./cdp";
+import * as interact from "./interact";
 
 const PORT = DEFAULT_PORT;
 const RECONNECT_MS = 2000;
@@ -140,11 +142,52 @@ async function onServerMessage(raw: string) {
 
 // --- Tab helpers ------------------------------------------------------------
 
+/**
+ * The tab the agent is working on. navigate/tabs set it, everything else
+ * inherits it, so a tool without an explicit tabId cannot drift onto an
+ * unrelated tab between calls.
+ */
+let currentTabId: number | null = null;
+
+function rememberTab(tabId: number): number {
+  currentTabId = tabId;
+  return tabId;
+}
+
 async function resolveTabId(tabId?: number): Promise<number> {
-  if (typeof tabId === "number") return tabId;
+  if (typeof tabId === "number") return rememberTab(tabId);
+
+  if (currentTabId != null) {
+    try {
+      const tab = await chrome.tabs.get(currentTabId);
+      if (tab?.id != null) return tab.id;
+    } catch {
+      currentTabId = null; // closed since we last used it
+    }
+  }
+
   const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   if (!tab?.id) throw new Error("No active tab found");
-  return tab.id;
+  return rememberTab(tab.id);
+}
+
+/** Restricted pages cannot be scripted; say so once, in one place. */
+async function assertScriptable(tabId: number): Promise<chrome.tabs.Tab> {
+  const tab = await chrome.tabs.get(tabId);
+  const url = tab.url ?? "";
+  if (
+    url.startsWith("chrome://") ||
+    url.startsWith("chrome-extension://") ||
+    url.startsWith("edge://") ||
+    url.startsWith("about:") ||
+    url.includes("chrome.google.com/webstore")
+  ) {
+    throw new Error(
+      `Cannot act on ${url || "this tab"}. Chrome blocks extensions on internal pages. ` +
+        "Navigate to an http(s) page first."
+    );
+  }
+  return tab;
 }
 
 async function getTab(tabId?: number): Promise<chrome.tabs.Tab> {
@@ -231,7 +274,12 @@ async function domCallFallback(
     args: [method, params],
   });
   const first = injected[0];
-  if (!first) throw new Error("executeScript returned no result");
+  if (!first) {
+    throw new Error(
+      "Could not run in the page: executeScript returned no frame result. " +
+        "The tab may still be loading, or the page may block extension scripts."
+    );
+  }
   return first.result;
 }
 
@@ -242,8 +290,16 @@ async function safeDom(
 ): Promise<unknown> {
   try {
     return await domCall(tabId, method, params);
-  } catch {
-    return await domCallFallback(tabId, method, params);
+  } catch (primary) {
+    try {
+      return await domCallFallback(tabId, method, params);
+    } catch (fallback) {
+      // Surface both reasons: hiding them behind a null was what sent people
+      // debugging the page instead of the tool.
+      const a = primary instanceof Error ? primary.message : String(primary);
+      const b = fallback instanceof Error ? fallback.message : String(fallback);
+      throw new Error(`${method} failed. Content script: ${a}. Injection: ${b}`);
+    }
   }
 }
 
@@ -255,6 +311,13 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
   const tabIdParam = params.tabId as number | undefined;
 
   switch (method) {
+    // Lets a developer pick up a rebuilt extension without visiting
+    // chrome://extensions. The socket drops and reconnects on its own.
+    case "reload_extension": {
+      setTimeout(() => chrome.runtime.reload(), 50);
+      return { ok: true, reloading: true, version: chrome.runtime.getManifest().version };
+    }
+
     case "active_tab": {
       const tab = await getTab(tabIdParam);
       return {
@@ -271,7 +334,12 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
       const url = String(params.url);
       if (params.newTab) {
         const tab = await chrome.tabs.create({ url, active: true });
-        if (tab.id) await waitForTabComplete(tab.id);
+        if (tab.id) {
+          rememberTab(tab.id);
+          await waitForTabComplete(tab.id);
+          const fresh = await chrome.tabs.get(tab.id);
+          return { tabId: tab.id, url: fresh.url, title: fresh.title };
+        }
         return { tabId: tab.id, url: tab.url, title: tab.title };
       }
       const id = await resolveTabId(tabIdParam);
@@ -319,6 +387,7 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
           url: (params.url as string) || "about:blank",
           active: true,
         });
+        if (tab.id) rememberTab(tab.id);
         return { id: tab.id, url: tab.url };
       }
       if (action === "close") {
@@ -337,52 +406,125 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
     }
 
     case "screenshot": {
-      const tab = await getTab(tabIdParam);
-      if (tab.id == null) throw new Error("Tab has no id");
-      // captureVisibleTab needs the window focused on that tab's viewport
-      if (!tab.active) {
-        await chrome.tabs.update(tab.id, { active: true });
-        await new Promise((r) => setTimeout(r, 100));
+      const id = await resolveTabId(tabIdParam);
+      const tab = await assertScriptable(id);
+
+      // Page.captureScreenshot works on a background tab and can shoot the
+      // full page. captureVisibleTab needs an activeTab grant we do not have,
+      // which is what made this fail outright.
+      if (await cdp.attach(id)) {
+        const data = await cdp.captureScreenshot(id, {
+          fullPage: Boolean(params.fullPage),
+        });
+        return { data, mimeType: "image/png", url: tab.url, title: tab.title };
       }
-      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-        format: "png",
-      });
-      const base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
-      return {
-        data: base64,
-        mimeType: "image/png",
-        url: tab.url,
-        title: tab.title,
-      };
+
+      // Fall back to the tabs API, which requires the tab to be visible.
+      if (!tab.active) {
+        await chrome.tabs.update(id, { active: true });
+        await new Promise((r) => setTimeout(r, 120));
+      }
+      try {
+        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+          format: "png",
+        });
+        return {
+          data: dataUrl.replace(/^data:image\/png;base64,/, ""),
+          mimeType: "image/png",
+          url: tab.url,
+          title: tab.title,
+        };
+      } catch (err) {
+        const why = cdp.unavailableReason(id);
+        throw new Error(
+          `Screenshot failed: ${err instanceof Error ? err.message : String(err)}.` +
+            (why ? ` The debugger could not attach either: ${why}` : "") +
+            " Close DevTools on this tab if it is open, then retry."
+        );
+      }
     }
 
-    case "snapshot":
+    // Pointer and keyboard actions go through the debugger so the page sees
+    // isTrusted events. Component libraries drop synthetic ones.
     case "click":
+    case "click_xy":
     case "type":
     case "press_key":
     case "hover":
+    case "drag":
     case "select_option":
+    case "fill_form": {
+      const id = await resolveTabId(tabIdParam);
+      await assertScriptable(id);
+      await injectMainHooks(id);
+
+      if (!(await cdp.attach(id))) {
+        const why = cdp.unavailableReason(id) ?? "unknown reason";
+        throw new Error(
+          `Cannot send trusted input to this tab: ${why}. ` +
+            "This usually means DevTools is open on it, or another debugger is attached. " +
+            "Close DevTools and retry."
+        );
+      }
+
+      switch (method) {
+        case "click":
+          return await interact.click(id, params);
+        case "click_xy":
+          return await interact.clickAtPoint(id, params);
+        case "type":
+          return await interact.type(id, params);
+        case "press_key":
+          return await interact.pressKey(id, params);
+        case "hover":
+          return await interact.hover(id, params);
+        case "drag":
+          return await interact.drag(id, params);
+        case "select_option":
+          return await interact.selectOption(id, params);
+        case "fill_form":
+          return await interact.fillForm(id, params);
+      }
+      throw new Error(`Unhandled interaction: ${method}`);
+    }
+
+    // Real page evaluation. MV3 forbids new Function inside the extension,
+    // so this has to run out of process through the debugger.
+    case "evaluate": {
+      const id = await resolveTabId(tabIdParam);
+      await assertScriptable(id);
+      const script = String(params.script ?? "");
+      if (!script.trim()) throw new Error("script is required");
+
+      if (!(await cdp.attach(id))) {
+        const why = cdp.unavailableReason(id) ?? "unknown reason";
+        throw new Error(
+          `Cannot evaluate on this tab: ${why}. Close DevTools on it and retry.`
+        );
+      }
+      const value = await cdp.evaluate(id, script);
+      return { result: value };
+    }
+
+    case "snapshot":
     case "scroll":
     case "wait":
-    case "evaluate":
     case "get_text":
     case "get_html":
-    case "fill_form":
     case "find":
-    case "click_xy":
-    case "drag":
     case "highlight":
     case "file_upload":
     case "get_bounding_box":
     case "is_visible":
     case "dialog_policy":
     case "overlay":
+    case "resolve_target":
+    case "element_state":
+    case "select_option_native":
+    case "find_option":
     case "dialogs": {
       const id = await resolveTabId(tabIdParam);
-      const tab = await chrome.tabs.get(id);
-      if (tab.url?.startsWith("chrome://") || tab.url?.startsWith("chrome-extension://") || tab.url?.startsWith("edge://")) {
-        throw new Error(`Cannot access restricted URL: ${tab.url}`);
-      }
+      await assertScriptable(id);
       await injectMainHooks(id);
       const result = await safeDom(id, method, params);
       if (method === "snapshot") {
@@ -624,6 +766,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   return false;
 });
+
+// The interaction layer resolves elements through the content script, since
+// that is the world holding the snapshot ref map.
+interact.useDomChannel((tabId, method, params) => safeDom(tabId, method, params));
 
 // Start immediately when SW loads
 init();
