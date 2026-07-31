@@ -1,6 +1,6 @@
 {
   "name": "deeporax-browser-mcp-monorepo",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "private": true,
   "description": "Monorepo for deeporax-browser-mcp: Chrome extension + MCP server for AI browser control",
   "workspaces": [
