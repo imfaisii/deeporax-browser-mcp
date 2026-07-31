@@ -62,12 +62,23 @@ async function resolveTarget(
   tabId: number,
   params: Record<string, unknown>
 ): Promise<Target> {
+  // The content script raises the useful message ("stale ref", "no element
+  // matches selector"). Let it through rather than flattening every failure
+  // into one unhelpful line.
   const target = (await domCall(tabId, "resolve_target", {
     ref: params.ref,
     selector: params.selector,
   })) as Target;
+
   if (!target || typeof target.x !== "number") {
-    throw new Error("Could not resolve the target element");
+    const what = params.ref
+      ? `ref "${params.ref}"`
+      : params.selector
+        ? `selector "${params.selector}"`
+        : "the target";
+    throw new Error(
+      `Could not resolve ${what}. Take a fresh browser_snapshot and use a current ref.`
+    );
   }
   return target;
 }

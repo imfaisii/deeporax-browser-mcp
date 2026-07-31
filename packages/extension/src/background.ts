@@ -291,12 +291,18 @@ async function safeDom(
   try {
     return await domCall(tabId, method, params);
   } catch (primary) {
+    const a = primary instanceof Error ? primary.message : String(primary);
+
+    // A page-level rejection ("stale ref", "no element matches selector") is
+    // the answer, not a transport problem. Retrying via injection would only
+    // reproduce it and bury the useful text.
+    if (/stale|Unknown or stale|No element matches|not a <select>|zero size|Provide either/i.test(a)) {
+      throw primary instanceof Error ? primary : new Error(a);
+    }
+
     try {
       return await domCallFallback(tabId, method, params);
     } catch (fallback) {
-      // Surface both reasons: hiding them behind a null was what sent people
-      // debugging the page instead of the tool.
-      const a = primary instanceof Error ? primary.message : String(primary);
       const b = fallback instanceof Error ? fallback.message : String(fallback);
       throw new Error(`${method} failed. Content script: ${a}. Injection: ${b}`);
     }
