@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A debugger conflict no longer blocks interaction. When DevTools is open on a tab,
+  or another debugger owns it, clicks, typing and the rest now run as synthetic
+  events from the isolated world, and the result says the input was untrusted and
+  why, instead of the call failing. Typing that way is written through the native
+  value setter and read back, and modifier chords report that they cannot run
+  rather than looking like they worked
+- `chrome.debugger.attach` reporting "already attached" was taken as success even
+  when DevTools owned the session, so every later command failed with a misleading
+  "the session dropped, this input may or may not have been delivered". The
+  extension now probes the session to find out whether it is really ours
+- Network capture and trusted input each kept their own record of which tabs were
+  attached, so the two paths could fight over one tab. They now share one
+
 ### Added
 
 - Setup instructions for Cursor, Windsurf, VS Code (Copilot), Zed, Cline, Roo Code,

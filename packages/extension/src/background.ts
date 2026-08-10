@@ -11,8 +11,8 @@ let socket: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let lastStatus: "connected" | "disconnected" | "connecting" = "disconnected";
 
-/** tabId -> whether chrome.debugger is attached for network capture */
-const debuggerAttached = new Set<number>();
+/** Tabs where we have turned CDP network capture on. */
+const netEnabled = new Set<number>();
 type NetReq = {
   id: string;
   method: string;
@@ -489,12 +489,10 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
       await injectMainHooks(id);
 
       if (!(await cdp.attach(id))) {
-        const why = cdp.unavailableReason(id) ?? "unknown reason";
-        throw new Error(
-          `Cannot send trusted input to this tab: ${why}. ` +
-            "This usually means DevTools is open on it, or another debugger is attached. " +
-            "Close DevTools and retry."
-        );
+        // DevTools is open on the tab, or another debugger owns it. Do the
+        // action from the isolated world instead of refusing outright, and say
+        // in the result that the events were not trusted.
+        return await syntheticFallback(id, method, params, cdp.unavailableReason(id));
       }
 
       switch (method) {
@@ -631,7 +629,7 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
         /* content script optional */
       }
       requests.sort((a, b) => a.ts - b.ts);
-      return { requests: requests.slice(-limit), debuggerAttached: debuggerAttached.has(id) };
+      return { requests: requests.slice(-limit), debuggerAttached: cdp.isAttached(id) };
     }
 
     case "resize": {
@@ -671,6 +669,80 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
   }
 }
 
+/**
+ * Run an interaction without the debugger, for tabs where it cannot attach.
+ *
+ * Everything here dispatches synthetic events, which carry isTrusted:false and
+ * which component libraries are free to ignore. That is worth doing rather than
+ * failing the call, but only if the caller is told, so every result says how
+ * the input was delivered and the two cases that cannot work say so instead of
+ * returning ok.
+ */
+async function syntheticFallback(
+  tabId: number,
+  method: string,
+  params: Record<string, unknown>,
+  reason: string | undefined
+): Promise<unknown> {
+  const why = reason ?? "the debugger could not attach to this tab";
+  const degraded = {
+    trusted: false,
+    reason: why,
+    note:
+      "Delivered as synthetic events because the debugger could not attach, usually " +
+      "because DevTools is open on this tab. Pages built on component libraries may " +
+      "ignore untrusted input. Close DevTools for real input.",
+  };
+
+  switch (method) {
+    case "type":
+    case "clear": {
+      // Write through the native value setter, which frameworks notice, then
+      // read the field back rather than assuming the value took.
+      const before = (await safeDom(tabId, "field_probe", params)) as {
+        value?: string;
+        secret?: boolean;
+      };
+      const text = method === "clear" ? "" : String(params.text ?? "");
+      const wanted = method === "type" && params.append ? String(before.value ?? "") + text : text;
+
+      const set = (await safeDom(tabId, "field_force_set", { ...params, text: wanted })) as {
+        value?: string;
+      };
+      const actual = String(set.value ?? "");
+      if (actual !== wanted) {
+        const shown = before.secret
+          ? "the field rejected the value"
+          : `wanted ${JSON.stringify(wanted)}, field holds ${JSON.stringify(actual)}`;
+        throw new Error(`Typing without the debugger did not take: ${shown}. ${degraded.note}`);
+      }
+      if (params.submit) await safeDom(tabId, "press_key", { key: "Enter" });
+      return {
+        ...degraded,
+        ok: true,
+        ...(before.secret ? {} : { value: actual }),
+        submitted: Boolean(params.submit),
+      };
+    }
+
+    case "press_key": {
+      const key = String(params.key ?? "");
+      // A chord like Meta+a is a browser editing command, not something a DOM
+      // event triggers. Dispatching one would do nothing while looking fine.
+      if (key.length > 1 && key.includes("+")) {
+        throw new Error(
+          `Cannot press ${key} without the debugger: modifier chords are browser editing ` +
+            `commands and a synthetic key event does not trigger them. ${degraded.note}`
+        );
+      }
+      break;
+    }
+  }
+
+  const result = (await safeDom(tabId, method, params)) as Record<string, unknown>;
+  return { ...result, ...degraded };
+}
+
 async function injectMainHooks(tabId: number): Promise<void> {
   try {
     await chrome.scripting.executeScript({
@@ -687,12 +759,15 @@ async function injectMainHooks(tabId: number): Promise<void> {
   }
 }
 
+// Network capture goes through the same session bookkeeping as input, so the
+// two paths cannot fight over one tab's debugger.
 async function attachDebugger(tabId: number): Promise<void> {
-  if (debuggerAttached.has(tabId)) return;
-  await chrome.debugger.attach({ tabId }, "1.3");
-  debuggerAttached.add(tabId);
-  await chrome.debugger.sendCommand({ tabId }, "Network.enable");
-  // detach cleanup on tab close handled below
+  if (netEnabled.has(tabId) && cdp.isAttached(tabId)) return;
+  if (!(await cdp.attach(tabId))) {
+    throw new Error(cdp.unavailableReason(tabId) ?? "could not attach the debugger");
+  }
+  await cdp.send(tabId, "Network.enable");
+  netEnabled.add(tabId);
 }
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
@@ -736,19 +811,12 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 });
 
 chrome.debugger.onDetach.addListener((source) => {
-  if (source.tabId != null) debuggerAttached.delete(source.tabId);
+  if (source.tabId != null) netEnabled.delete(source.tabId);
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   networkByTab.delete(tabId);
-  if (debuggerAttached.has(tabId)) {
-    debuggerAttached.delete(tabId);
-    try {
-      void chrome.debugger.detach({ tabId });
-    } catch {
-      /* ignore */
-    }
-  }
+  netEnabled.delete(tabId);
 });
 
 // --- Lifecycle / keepalive --------------------------------------------------

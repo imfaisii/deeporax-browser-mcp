@@ -106,15 +106,39 @@ export async function attach(tabId: number): Promise<boolean> {
     return true;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // Another client already owns the session; treat it as usable if the
-    // message says so, otherwise remember the failure.
-    if (/already attached/i.test(message)) {
+    // "Already attached" does not say who owns the session. It may be ours
+    // (network capture opened it, or a previous service worker generation did)
+    // or a foreign client's, most often DevTools. Only the first case lets us
+    // send commands, so ask instead of assuming.
+    if (/already attached/i.test(message) && (await sessionIsOurs(tabId))) {
       attached.add(tabId);
       return true;
     }
     unavailable.set(tabId, { message, at: Date.now() });
     console.debug("[deeporax] debugger attach failed:", message);
     return false;
+  }
+}
+
+/**
+ * Send a harmless command to find out whether the existing session is one we
+ * can address. Only "not attached" proves it belongs to someone else; any
+ * other failure still came back from a session we own.
+ */
+async function sessionIsOurs(tabId: number): Promise<boolean> {
+  try {
+    await withTimeout(
+      chrome.debugger.sendCommand({ tabId }, "Runtime.evaluate", {
+        expression: "1",
+        returnByValue: true,
+      }),
+      ATTACH_TIMEOUT_MS,
+      "debugger probe"
+    );
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return !/not attached/i.test(message);
   }
 }
 
