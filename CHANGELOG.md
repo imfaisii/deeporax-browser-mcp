@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Agent navigate / new-tab / screenshot no longer steal focus from the tab you
+  are using. Work continues in the session group in the background; only the
+  install welcome page still opens focused
 - Stale or closed tab ids are rejected immediately with a clear error instead of
   being remembered and retried. Resolution falls back to the Deeporax session
   group before the last-focused window (which is often the IDE, not the task)

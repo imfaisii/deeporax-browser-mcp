@@ -564,6 +564,10 @@ Omit `tabId` so tools stay on the Deeporax session tab. After `No tab with id`, 
 **Where did the agent tabs go?**
 Each chat gets its own Chrome tab group (different colors). The group title is a short topic from the URL (for example `X · post`) or a `groupLabel` you pass. A second chat does not reuse the first chat's tabs. Reload the extension after updating so the `tabGroups` permission applies.
 
+**Agent keeps jumping me off my tab**
+Current builds open and navigate agent tabs in the background so your focused
+tab stays put. Reload the extension if an older build still activates tabs.
+
 **Second chat took over the first chat's tabs**
 Fixed in current builds: every MCP process stamps a `sessionId` on bridge calls. Reload the extension and restart both chats so each gets a fresh server process.
 

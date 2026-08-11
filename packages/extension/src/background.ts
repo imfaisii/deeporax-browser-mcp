@@ -680,7 +680,8 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
       const id = await resolveTabId(tabIdParam, sid);
       // Arm before navigation so the first image wave is already intercepted.
       if (blockHeavyAssets) await applyAssetBlocking(id);
-      await chrome.tabs.update(id, { url, active: true });
+      // Never steal the user's focused tab; agent work runs in the session group.
+      await chrome.tabs.update(id, { url });
       rememberTab(id, sid);
       let groupId = await placeInSessionGroup(id, topic, sid);
       const load = await waitForTabComplete(id);
@@ -785,10 +786,10 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
         return { ok: true, closed: id, sessionId: sid };
       }
       if (action === "select") {
+        // Session bookkeeping only. Do not activate the tab or focus the
+        // window — that would yank the user off whatever they are doing.
         const id = await resolveTabId(tabIdParam, sid);
         const tab = await chrome.tabs.get(id);
-        await chrome.windows.update(tab.windowId, { focused: true });
-        await chrome.tabs.update(id, { active: true });
         rememberTab(id, sid);
         await placeInSessionGroup(
           id,
@@ -800,6 +801,8 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
           tabId: id,
           groupTitle: sess.title,
           sessionId: sid,
+          activated: false,
+          note: "Session current tab updated without focusing the browser. Agent work stays in the background group.",
         };
       }
       throw new Error(`Unknown tabs action: ${action}`);
@@ -838,29 +841,35 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
         }
       }
 
-      // Fall back to the tabs API, which requires the tab to be visible.
-      if (!tab.active) {
-        await chrome.tabs.update(id, { active: true });
-        await new Promise((r) => setTimeout(r, 120));
+      // captureVisibleTab needs the tab to be the visible one in its window.
+      // Activating it would steal focus from the user, so only use that path
+      // when the agent tab is already active. Prefer CDP (works in background).
+      if (tab.active) {
+        try {
+          const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
+            format: "png",
+          });
+          return {
+            data: dataUrl.replace(/^data:image\/png;base64,/, ""),
+            mimeType: "image/png",
+            url: tab.url,
+            title: tab.title,
+          };
+        } catch (err) {
+          const why = cdp.unavailableReason(id);
+          throw new Error(
+            `Screenshot failed: ${err instanceof Error ? err.message : String(err)}.` +
+              (why ? ` The debugger could not attach either: ${why}` : "") +
+              " Close DevTools on this tab if it is open, then retry."
+          );
+        }
       }
-      try {
-        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-          format: "png",
-        });
-        return {
-          data: dataUrl.replace(/^data:image\/png;base64,/, ""),
-          mimeType: "image/png",
-          url: tab.url,
-          title: tab.title,
-        };
-      } catch (err) {
-        const why = cdp.unavailableReason(id);
-        throw new Error(
-          `Screenshot failed: ${err instanceof Error ? err.message : String(err)}.` +
-            (why ? ` The debugger could not attach either: ${why}` : "") +
-            " Close DevTools on this tab if it is open, then retry."
-        );
-      }
+      const why = cdp.unavailableReason(id);
+      throw new Error(
+        "Screenshot needs the debugger on a background agent tab so your focused tab is not stolen." +
+          (why ? ` Debugger attach failed: ${why}.` : "") +
+          " Close DevTools on the agent tab if it is open, then retry."
+      );
     }
 
     // Pointer and keyboard actions go through the debugger so the page sees
@@ -1248,8 +1257,12 @@ async function openTabForSession(
   sid: string,
   topic?: string
 ): Promise<{ tabId: number; groupId: number | null }> {
+  // Background tabs: keep the user's current tab focused while the agent works.
   if (blockHeavyAssets) {
-    const blank = await chrome.tabs.create({ url: "about:blank", active: true });
+    const blank = await chrome.tabs.create({
+      url: "about:blank",
+      active: false,
+    });
     if (!blank.id) throw new Error("Failed to create tab");
     rememberTab(blank.id, sid);
     const groupId = await placeInSessionGroup(blank.id, topic, sid);
@@ -1257,7 +1270,7 @@ async function openTabForSession(
     await chrome.tabs.update(blank.id, { url });
     return { tabId: blank.id, groupId };
   }
-  const tab = await chrome.tabs.create({ url, active: true });
+  const tab = await chrome.tabs.create({ url, active: false });
   if (!tab.id) throw new Error("Failed to create tab");
   rememberTab(tab.id, sid);
   const groupId = await placeInSessionGroup(tab.id, topic, sid);
