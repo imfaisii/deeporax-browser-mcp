@@ -7,7 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Agent tabs are grouped under a Chrome tab group titled **Deeporax** (green).
+  `navigate` and `tabs` action=new place tabs there automatically so agent work
+  stays visibly isolated from the rest of the browser
+- `browser_tabs` action=list accepts `sessionOnly` to list only tabs in that
+  group, and each tab reports `groupId` / `inSessionGroup`
+- MCP instructions and `browser_status` now spell out anti-loop rules: never
+  retry a dead tab id, treat `navigated:false` and `trusted:false` as stop
+  signals, keep waits short, re-snapshot after DOM changes
+
 ### Fixed
+
+- Stale or closed tab ids are rejected immediately with a clear error instead of
+  being remembered and retried. Resolution falls back to the Deeporax session
+  group before the last-focused window (which is often the IDE, not the task)
+- Navigate no longer burns a 30s bridge timeout on a hung load. It waits up to
+  15s, then returns the actual URL with `loadTimedOut` / `navigated` so agents
+  can stop looping on a false success
+- `browser_wait` defaults and hard caps are tighter (default 10s, max 20s) so
+  idle waits cannot park the extension for a full minute
+
+### Fixed (earlier)
 
 - A debugger conflict no longer blocks interaction. When DevTools is open on a tab,
   or another debugger owns it, clicks, typing and the rest now run as synthetic
@@ -22,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Network capture and trusted input each kept their own record of which tabs were
   attached, so the two paths could fight over one tab. They now share one
 
-### Added
+### Added (earlier)
 
 - Setup instructions for Cursor, Windsurf, VS Code (Copilot), Zed, Cline, Roo Code,
   Continue, Gemini CLI, Codex CLI, opencode, Goose, JetBrains, Warp, and LM Studio,

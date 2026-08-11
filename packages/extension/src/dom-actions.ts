@@ -1208,7 +1208,9 @@ export async function handleDomMethodAsync(
   }
 
   if (method === "wait") {
-    const timeoutMs = Math.min(Number(params.timeout ?? 15) * 1000, 60_000);
+    // Cap hard so an agent cannot park a content-script wait for a full
+    // minute while the bridge looks hung.
+    const timeoutMs = Math.min(Number(params.timeout ?? 10) * 1000, 20_000);
     const start = Date.now();
 
     if (params.time != null) {

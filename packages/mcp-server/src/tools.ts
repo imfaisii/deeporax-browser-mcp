@@ -53,7 +53,7 @@ const refOrSelector = {
 export function registerTools(server: McpServer): void {
   server.tool(
     "browser_status",
-    "Check whether the Chrome extension is connected and report the active tab.",
+    "Check whether the Chrome extension is connected and report the session tab (Deeporax group) plus connection info. Prefer this over guessing tab ids.",
     {},
     async () => {
       try {
@@ -66,7 +66,13 @@ export function registerTools(server: McpServer): void {
           });
         }
         const tab = await call("active_tab");
-        return textResult({ ...status, connected: true, activeTab: tab });
+        return textResult({
+          ...status,
+          connected: true,
+          activeTab: tab,
+          guidance:
+            "Omit tabId on tools to stay on this session tab. If a later call says No tab with id, list tabs or call status again — never retry a dead id. trusted:false means close DevTools before typing.",
+        });
       } catch (err) {
         return errorResult(err);
       }
@@ -75,18 +81,25 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_navigate",
-    "Navigate the current (or specified) tab to a URL.",
+    "Navigate the current (or specified) tab to a URL. Places the tab in the Deeporax session tab group. Returns the actual url plus navigated/loadTimedOut — if navigated is false, do not assume the page changed.",
     {
       url: z.string().url().describe("Absolute URL to open"),
       tabId,
       newTab: z
         .boolean()
         .optional()
-        .describe("If true, open the URL in a new tab"),
+        .describe(
+          "If true, open the URL in a new tab inside the Deeporax session group"
+        ),
     },
     async ({ url, tabId: id, newTab }) => {
       try {
-        const result = await call("navigate", { url, tabId: id, newTab });
+        // Navigate can wait up to ~15s for load; give the bridge headroom.
+        const result = await call(
+          "navigate",
+          { url, tabId: id, newTab },
+          45_000
+        );
         return textResult(result);
       } catch (err) {
         return errorResult(err);
@@ -138,15 +151,23 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_tabs",
-    "List, create, close, or select browser tabs.",
+    "List, create, close, or select browser tabs. New tabs join the Deeporax session group. Prefer action=list with sessionOnly=true to see only agent tabs. Never reuse a tab id after 'No tab with id'.",
     {
       action: z.enum(["list", "new", "close", "select"]),
       tabId: z.number().int().optional(),
       url: z.string().url().optional().describe("URL for action=new"),
+      sessionOnly: z
+        .boolean()
+        .optional()
+        .describe(
+          "For action=list: if true, only tabs in the Deeporax session group"
+        ),
     },
-    async ({ action, tabId: id, url }) => {
+    async ({ action, tabId: id, url, sessionOnly }) => {
       try {
-        return textResult(await call("tabs", { action, tabId: id, url }));
+        return textResult(
+          await call("tabs", { action, tabId: id, url, sessionOnly })
+        );
       } catch (err) {
         return errorResult(err);
       }
@@ -490,21 +511,38 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_wait",
-    "Wait for time, text, selector, or for text to disappear.",
+    "Wait for time, text, selector, or for text to disappear. Keep waits short (default max 10s). Prefer browser_snapshot to check state instead of long idle waits — long waits are a common stuck-loop smell.",
     {
       tabId,
-      time: z.number().optional().describe("Seconds to wait"),
+      time: z
+        .number()
+        .optional()
+        .describe("Seconds to wait (capped; prefer ≤5)"),
       text: z.string().optional().describe("Wait until this text appears"),
       textGone: z.string().optional().describe("Wait until this text is gone"),
       selector: z.string().optional().describe("Wait until selector matches"),
       timeout: z
         .number()
         .optional()
-        .describe("Max seconds to wait (default 15)"),
+        .describe("Max seconds to wait (default 10, hard cap 20)"),
     },
     async (args) => {
       try {
-        return textResult(await call("wait", args));
+        const capSec = Math.min(Number(args.timeout ?? 10), 20);
+        const timeSec =
+          args.time != null ? Math.min(Number(args.time), capSec) : undefined;
+        const bridgeMs = Math.min(Math.max(capSec * 1000 + 5_000, 10_000), 30_000);
+        return textResult(
+          await call(
+            "wait",
+            {
+              ...args,
+              time: timeSec,
+              timeout: capSec,
+            },
+            bridgeMs
+          )
+        );
       } catch (err) {
         return errorResult(err);
       }

@@ -149,31 +149,162 @@ async function onServerMessage(raw: string) {
  */
 let currentTabId: number | null = null;
 
+/**
+ * Chrome tab group that holds this session's work. New tabs and navigated
+ * tabs are moved into it so agent work is visibly isolated from the user's
+ * other tabs (same idea as Claude's browser extension).
+ */
+const SESSION_GROUP_TITLE = "Deeporax";
+const SESSION_GROUP_COLOR = "green" as const;
+let sessionGroupId: number | null = null;
+
 function rememberTab(tabId: number): number {
   currentTabId = tabId;
   return tabId;
 }
 
+/** Live tab id for a session group, preferring the active one. */
+async function findSessionGroupTab(): Promise<number | null> {
+  const groupId = await resolveSessionGroupId();
+  if (groupId == null) return null;
+  try {
+    const tabs = await chrome.tabs.query({ groupId });
+    if (!tabs.length) return null;
+    const active = tabs.find((t) => t.active && t.id != null);
+    if (active?.id != null) return active.id;
+    const sorted = [...tabs].sort(
+      (a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0)
+    );
+    return sorted[0]?.id ?? null;
+  } catch {
+    sessionGroupId = null;
+    return null;
+  }
+}
+
+async function resolveSessionGroupId(): Promise<number | null> {
+  if (sessionGroupId != null) {
+    try {
+      await chrome.tabGroups.get(sessionGroupId);
+      return sessionGroupId;
+    } catch {
+      sessionGroupId = null;
+    }
+  }
+  try {
+    const groups = await chrome.tabGroups.query({ title: SESSION_GROUP_TITLE });
+    if (groups[0]) {
+      sessionGroupId = groups[0].id;
+      return sessionGroupId;
+    }
+  } catch {
+    /* tabGroups permission missing or API unavailable */
+  }
+  return null;
+}
+
+/**
+ * Put a tab in the Deeporax session group for its window. Creates the group
+ * on first use. Failures are ignored: isolation is best-effort, never a
+ * reason to block navigation.
+ */
+async function placeInSessionGroup(tabId: number): Promise<number | null> {
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    const inWindow = await chrome.tabGroups.query({
+      windowId: tab.windowId,
+      title: SESSION_GROUP_TITLE,
+    });
+    if (inWindow[0]) {
+      await chrome.tabs.group({ tabIds: tabId, groupId: inWindow[0].id });
+      sessionGroupId = inWindow[0].id;
+      await chrome.tabGroups.update(sessionGroupId, {
+        title: SESSION_GROUP_TITLE,
+        color: SESSION_GROUP_COLOR,
+        collapsed: false,
+      });
+      return sessionGroupId;
+    }
+
+    if (sessionGroupId != null) {
+      try {
+        const g = await chrome.tabGroups.get(sessionGroupId);
+        if (g.windowId === tab.windowId) {
+          await chrome.tabs.group({ tabIds: tabId, groupId: sessionGroupId });
+          await chrome.tabGroups.update(sessionGroupId, {
+            collapsed: false,
+          });
+          return sessionGroupId;
+        }
+      } catch {
+        sessionGroupId = null;
+      }
+    }
+
+    const groupId = await chrome.tabs.group({ tabIds: tabId });
+    await chrome.tabGroups.update(groupId, {
+      title: SESSION_GROUP_TITLE,
+      color: SESSION_GROUP_COLOR,
+      collapsed: false,
+    });
+    sessionGroupId = groupId;
+    return groupId;
+  } catch {
+    return null;
+  }
+}
+
 async function resolveTabId(tabId?: number): Promise<number> {
-  if (typeof tabId === "number") return rememberTab(tabId);
+  // Explicit ids must still be live. Remembering a dead id is what made
+  // agents retry the same "No tab with id" for minutes.
+  if (typeof tabId === "number") {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab?.id != null) return rememberTab(tab.id);
+    } catch {
+      if (currentTabId === tabId) currentTabId = null;
+      throw new Error(
+        `No tab with id ${tabId}. It was closed or never existed. ` +
+          "Call browser_tabs action=list and use a fresh id, or omit tabId " +
+          "to use the Deeporax session tab. Do not retry the same id."
+      );
+    }
+  }
 
   if (currentTabId != null) {
     try {
       const tab = await chrome.tabs.get(currentTabId);
       if (tab?.id != null) return tab.id;
     } catch {
-      currentTabId = null; // closed since we last used it
+      currentTabId = null;
     }
   }
 
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  // Prefer a tab already in the session group over whatever window last
+  // focused (which is often the user's IDE preview, not the agent task).
+  const grouped = await findSessionGroupTab();
+  if (grouped != null) return rememberTab(grouped);
+
+  const [tab] = await chrome.tabs.query({
+    active: true,
+    lastFocusedWindow: true,
+  });
   if (!tab?.id) throw new Error("No active tab found");
   return rememberTab(tab.id);
 }
 
 /** Restricted pages cannot be scripted; say so once, in one place. */
 async function assertScriptable(tabId: number): Promise<chrome.tabs.Tab> {
-  const tab = await chrome.tabs.get(tabId);
+  let tab: chrome.tabs.Tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch {
+    if (currentTabId === tabId) currentTabId = null;
+    throw new Error(
+      `No tab with id ${tabId}. It was closed or never existed. ` +
+        "Call browser_tabs action=list and use a fresh id, or omit tabId."
+    );
+  }
   const url = tab.url ?? "";
   if (
     url.startsWith("chrome://") ||
@@ -192,11 +323,26 @@ async function assertScriptable(tabId: number): Promise<chrome.tabs.Tab> {
 
 async function getTab(tabId?: number): Promise<chrome.tabs.Tab> {
   const id = await resolveTabId(tabId);
-  const tab = await chrome.tabs.get(id);
-  return tab;
+  try {
+    return await chrome.tabs.get(id);
+  } catch {
+    if (currentTabId === id) currentTabId = null;
+    throw new Error(
+      `No tab with id ${id}. It was closed or never existed. ` +
+        "Call browser_tabs action=list and use a fresh id, or omit tabId."
+    );
+  }
 }
 
-function waitForTabComplete(tabId: number, timeoutMs = 30_000): Promise<void> {
+/**
+ * Wait until the tab reports complete, or until the budget runs out.
+ * Resolves either way so navigate can return the actual URL instead of
+ * burning a full bridge timeout on a hung load.
+ */
+function waitForTabComplete(
+  tabId: number,
+  timeoutMs = 15_000
+): Promise<{ timedOut: boolean }> {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const timer = setInterval(async () => {
@@ -205,10 +351,10 @@ function waitForTabComplete(tabId: number, timeoutMs = 30_000): Promise<void> {
         if (tab.status === "complete") {
           clearInterval(timer);
           // small settle delay for client-side routers
-          setTimeout(() => resolve(), 150);
+          setTimeout(() => resolve({ timedOut: false }), 150);
         } else if (Date.now() - start > timeoutMs) {
           clearInterval(timer);
-          reject(new Error("Navigation timed out"));
+          resolve({ timedOut: true });
         }
       } catch (err) {
         clearInterval(timer);
@@ -330,6 +476,7 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
 
     case "active_tab": {
       const tab = await getTab(tabIdParam);
+      const groupId = await resolveSessionGroupId();
       return {
         id: tab.id,
         url: tab.url,
@@ -337,6 +484,9 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
         status: tab.status,
         windowId: tab.windowId,
         active: tab.active,
+        groupId: typeof tab.groupId === "number" ? tab.groupId : -1,
+        sessionGroupId: groupId,
+        sessionGroupTitle: SESSION_GROUP_TITLE,
       };
     }
 
@@ -346,17 +496,41 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
         const tab = await chrome.tabs.create({ url, active: true });
         if (tab.id) {
           rememberTab(tab.id);
-          await waitForTabComplete(tab.id);
+          const groupId = await placeInSessionGroup(tab.id);
+          const load = await waitForTabComplete(tab.id);
           const fresh = await chrome.tabs.get(tab.id);
-          return { tabId: tab.id, url: fresh.url, title: fresh.title };
+          return {
+            tabId: tab.id,
+            url: fresh.url,
+            title: fresh.title,
+            groupId,
+            loadTimedOut: load.timedOut,
+          };
         }
         return { tabId: tab.id, url: tab.url, title: tab.title };
       }
       const id = await resolveTabId(tabIdParam);
-      await chrome.tabs.update(id, { url });
-      await waitForTabComplete(id);
+      await chrome.tabs.update(id, { url, active: true });
+      rememberTab(id);
+      const groupId = await placeInSessionGroup(id);
+      const load = await waitForTabComplete(id);
       const tab = await chrome.tabs.get(id);
-      return { tabId: id, url: tab.url, title: tab.title };
+      // SPAs and redirects often leave the requested URL off the final
+      // location. Surface both so the agent can stop retrying a "success"
+      // that never left the previous page.
+      return {
+        tabId: id,
+        url: tab.url,
+        title: tab.title,
+        requestedUrl: url,
+        navigated:
+          Boolean(tab.url) &&
+          (tab.url === url ||
+            tab.url!.startsWith(url) ||
+            url.startsWith(tab.url!.split("#")[0]!)),
+        groupId,
+        loadTimedOut: load.timedOut,
+      };
     }
 
     case "back": {
@@ -383,13 +557,21 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
     case "tabs": {
       const action = String(params.action);
       if (action === "list") {
-        const tabs = await chrome.tabs.query({});
+        const sessionOnly = Boolean(params.sessionOnly);
+        const groupId = await resolveSessionGroupId();
+        const tabs =
+          sessionOnly && groupId != null
+            ? await chrome.tabs.query({ groupId })
+            : await chrome.tabs.query({});
         return tabs.map((t) => ({
           id: t.id,
           url: t.url,
           title: t.title,
           active: t.active,
           windowId: t.windowId,
+          groupId: typeof t.groupId === "number" ? t.groupId : -1,
+          inSessionGroup: groupId != null && t.groupId === groupId,
+          sessionGroupId: groupId,
         }));
       }
       if (action === "new") {
@@ -397,12 +579,17 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
           url: (params.url as string) || "about:blank",
           active: true,
         });
-        if (tab.id) rememberTab(tab.id);
+        if (tab.id) {
+          rememberTab(tab.id);
+          const groupId = await placeInSessionGroup(tab.id);
+          return { id: tab.id, url: tab.url, groupId };
+        }
         return { id: tab.id, url: tab.url };
       }
       if (action === "close") {
         const id = await resolveTabId(tabIdParam);
         await chrome.tabs.remove(id);
+        if (currentTabId === id) currentTabId = null;
         return { ok: true, closed: id };
       }
       if (action === "select") {
@@ -410,6 +597,8 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
         const tab = await chrome.tabs.get(id);
         await chrome.windows.update(tab.windowId, { focused: true });
         await chrome.tabs.update(id, { active: true });
+        rememberTab(id);
+        await placeInSessionGroup(id);
         return { ok: true, tabId: id };
       }
       throw new Error(`Unknown tabs action: ${action}`);
@@ -817,6 +1006,7 @@ chrome.debugger.onDetach.addListener((source) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   networkByTab.delete(tabId);
   netEnabled.delete(tabId);
+  if (currentTabId === tabId) currentTabId = null;
 });
 
 // --- Lifecycle / keepalive --------------------------------------------------

@@ -384,10 +384,10 @@ You should see `connected: true` and a DOM snapshot with refs like `e1`, `e2`.
 
 | Tool | Purpose |
 |------|---------|
-| `browser_navigate` | Go to a URL, optionally in a new tab |
-| `browser_tabs` | list / new / close / select |
+| `browser_navigate` | Go to a URL, optionally in a new tab (joins the Deeporax tab group) |
+| `browser_tabs` | list / new / close / select (`sessionOnly` lists only agent tabs) |
 | `browser_back` / `browser_forward` / `browser_reload` | History |
-| `browser_wait` | Wait for time, text, or a selector |
+| `browser_wait` | Wait for time, text, or a selector (short caps; prefer snapshot) |
 | `browser_resize` | Resize the browser window |
 
 **Debug**
@@ -403,7 +403,7 @@ You should see `connected: true` and a DOM snapshot with refs like `e1`, `e2`.
 
 | Tool | Purpose |
 |------|---------|
-| `browser_status` | Extension connection and active tab |
+| `browser_status` | Extension connection, session tab, and anti-loop guidance |
 | `browser_overlay` | Show/hide the overlay, or resume after a user pressed Stop |
 | `browser_highlight` | Outline an element so a human can see it |
 | `browser_batch` | Run several actions in one round-trip |
@@ -548,6 +548,12 @@ Chrome blocks extensions on `chrome://`, the Web Store, and other privileged pag
 
 **Snapshot returns few elements on a complex app**
 Cross-origin iframes are not walked yet. Use `browser_evaluate` or a CSS selector for those regions.
+
+**Agent keeps retrying the same tab id or navigate**
+Omit `tabId` so tools stay on the Deeporax session tab. After `No tab with id`, call `browser_tabs` with `sessionOnly: true` or `browser_status` for a fresh id — never retry the dead one. If navigate returns `navigated: false` or the snapshot URL did not change, open `newTab: true` instead of looping. If results show `trusted: false`, close DevTools on that tab; React and other component libraries ignore synthetic input.
+
+**Where did the agent tabs go?**
+They live in a green Chrome tab group titled **Deeporax**. New tabs and navigated tabs are moved there automatically so agent work stays separate from yours. Reload the extension after updating so the `tabGroups` permission applies.
 
 ## Security
 
