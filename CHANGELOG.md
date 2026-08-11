@@ -9,11 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Agent tabs are grouped under a Chrome tab group titled **Deeporax** (green).
-  `navigate` and `tabs` action=new place tabs there automatically so agent work
-  stays visibly isolated from the rest of the browser
-- `browser_tabs` action=list accepts `sessionOnly` to list only tabs in that
-  group, and each tab reports `groupId` / `inSessionGroup`
+- Each chat gets its own `sessionId`, current tab, and Chrome tab group
+  (distinct color). Isolation keys off `CLAUDE_CODE_SESSION_ID` (and similar
+  host env vars) so two chats sharing one MCP process still stay separate; falls
+  back to process id only when no conversation id is present
+- A second chat no longer inherits or steals the first chat's tabs;
+  `browser_tabs` list defaults to this session only
+- Tab group titles are short topics from the URL (e.g. `X · post`) or optional
+  `groupLabel` on navigate/tabs
+- `browser_tabs` action=list accepts `sessionOnly` (default true for isolation)
 - MCP instructions and `browser_status` now spell out anti-loop rules: never
   retry a dead tab id, treat `navigated:false` and `trusted:false` as stop
   signals, keep waits short, re-snapshot after DOM changes

@@ -553,7 +553,10 @@ Cross-origin iframes are not walked yet. Use `browser_evaluate` or a CSS selecto
 Omit `tabId` so tools stay on the Deeporax session tab. After `No tab with id`, call `browser_tabs` with `sessionOnly: true` or `browser_status` for a fresh id — never retry the dead one. If navigate returns `navigated: false` or the snapshot URL did not change, open `newTab: true` instead of looping. If results show `trusted: false`, close DevTools on that tab; React and other component libraries ignore synthetic input.
 
 **Where did the agent tabs go?**
-They live in a green Chrome tab group titled **Deeporax**. New tabs and navigated tabs are moved there automatically so agent work stays separate from yours. Reload the extension after updating so the `tabGroups` permission applies.
+Each chat gets its own Chrome tab group (different colors). The group title is a short topic from the URL (for example `X · post`) or a `groupLabel` you pass. A second chat does not reuse the first chat's tabs. Reload the extension after updating so the `tabGroups` permission applies.
+
+**Second chat took over the first chat's tabs**
+Fixed in current builds: every MCP process stamps a `sessionId` on bridge calls. Reload the extension and restart both chats so each gets a fresh server process.
 
 ## Security
 

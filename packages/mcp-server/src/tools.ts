@@ -53,7 +53,7 @@ const refOrSelector = {
 export function registerTools(server: McpServer): void {
   server.tool(
     "browser_status",
-    "Check whether the Chrome extension is connected and report the session tab (Deeporax group) plus connection info. Prefer this over guessing tab ids.",
+    "Check whether the Chrome extension is connected and report THIS chat's session tab (not another chat's). Each MCP process has its own sessionId, tab, and tab group.",
     {},
     async () => {
       try {
@@ -63,6 +63,7 @@ export function registerTools(server: McpServer): void {
             connected: false,
             extensionPath: extensionPath(),
             message: loadExtensionHint(),
+            sessionId: bridge.sessionId,
           });
         }
         const tab = await call("active_tab");
@@ -71,7 +72,10 @@ export function registerTools(server: McpServer): void {
           connected: true,
           activeTab: tab,
           guidance:
-            "Omit tabId on tools to stay on this session tab. If a later call says No tab with id, list tabs or call status again — never retry a dead id. trusted:false means close DevTools before typing.",
+            "This chat only owns tabs in its own group (sessionId on status). " +
+            "Omit tabId to stay on this session's tab. If there is no session tab yet, " +
+            "browser_navigate opens one. Never reuse another chat's tab id. " +
+            "trusted:false means close DevTools before typing.",
         });
       } catch (err) {
         return errorResult(err);
@@ -81,7 +85,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_navigate",
-    "Navigate the current (or specified) tab to a URL. Places the tab in the Deeporax session tab group. Returns the actual url plus navigated/loadTimedOut — if navigated is false, do not assume the page changed.",
+    "Navigate the current (or specified) tab to a URL. Places the tab in the session tab group and renames that group to a short topic from the URL (or groupLabel). Returns the actual url plus navigated/loadTimedOut — if navigated is false, do not assume the page changed.",
     {
       url: z.string().url().describe("Absolute URL to open"),
       tabId,
@@ -89,15 +93,21 @@ export function registerTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          "If true, open the URL in a new tab inside the Deeporax session group"
+          "If true, open the URL in a new tab inside the session tab group"
+        ),
+      groupLabel: z
+        .string()
+        .optional()
+        .describe(
+          "Optional short topic for the Chrome tab group, e.g. 'X replies' or 'Ads setup'. Defaults to a label derived from the URL."
         ),
     },
-    async ({ url, tabId: id, newTab }) => {
+    async ({ url, tabId: id, newTab, groupLabel }) => {
       try {
         // Navigate can wait up to ~15s for load; give the bridge headroom.
         const result = await call(
           "navigate",
-          { url, tabId: id, newTab },
+          { url, tabId: id, newTab, groupLabel },
           45_000
         );
         return textResult(result);
@@ -151,7 +161,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_tabs",
-    "List, create, close, or select browser tabs. New tabs join the Deeporax session group. Prefer action=list with sessionOnly=true to see only agent tabs. Never reuse a tab id after 'No tab with id'.",
+    "List, create, close, or select tabs for THIS chat session. List defaults to sessionOnly (only this chat's group). New tabs join this session's group. Never reuse a tab id from another chat or after 'No tab with id'.",
     {
       action: z.enum(["list", "new", "close", "select"]),
       tabId: z.number().int().optional(),
@@ -160,13 +170,25 @@ export function registerTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe(
-          "For action=list: if true, only tabs in the Deeporax session group"
+          "For action=list: default true (only this chat's tabs). Pass false to list every browser tab."
+        ),
+      groupLabel: z
+        .string()
+        .optional()
+        .describe(
+          "For action=new: optional short topic for this chat's Chrome tab group"
         ),
     },
-    async ({ action, tabId: id, url, sessionOnly }) => {
+    async ({ action, tabId: id, url, sessionOnly, groupLabel }) => {
       try {
         return textResult(
-          await call("tabs", { action, tabId: id, url, sessionOnly })
+          await call("tabs", {
+            action,
+            tabId: id,
+            url,
+            sessionOnly,
+            groupLabel,
+          })
         );
       } catch (err) {
         return errorResult(err);

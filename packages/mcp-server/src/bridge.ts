@@ -26,6 +26,25 @@ const REQUEST_TIMEOUT_MS = 30_000;
  */
 const WATCH_BIND_MS = 3_000;
 
+/**
+ * Pick a stable id that is unique per chat/conversation when the host provides
+ * one. Fall back to process id only when nothing better is available.
+ */
+function resolveSessionId(): string {
+  const candidates = [
+    process.env.DEEPORAX_SESSION_ID,
+    process.env.CLAUDE_CODE_SESSION_ID,
+    process.env.CLAUDE_SESSION_ID,
+    process.env.CURSOR_SESSION_ID,
+    process.env.VSCODE_SESSION_ID,
+  ];
+  for (const raw of candidates) {
+    const v = typeof raw === "string" ? raw.trim() : "";
+    if (v) return `c_${v}`;
+  }
+  return `p_${process.pid}`;
+}
+
 export class ExtensionBridge {
   private wss: WebSocketServer | null = null;
   private client: WebSocket | null = null;
@@ -34,6 +53,13 @@ export class ExtensionBridge {
   private seq = 0;
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private bindAttempts = 0;
+  /**
+   * Identity for browser isolation. Prefer the host's conversation id
+   * (Claude Code sets CLAUDE_CODE_SESSION_ID per chat). Pid alone is wrong when
+   * two chats share one long-lived MCP process, or when only one process ever
+   * binds the bridge and the rest peer through it without unique ids.
+   */
+  readonly sessionId = resolveSessionId();
   /** True while another live server holds the port and we are waiting for it. */
   private waiting = false;
   /** Process id of whoever holds the port, so errors can name it. */
@@ -64,7 +90,9 @@ export class ExtensionBridge {
       this.bindAttempts = 0;
       this.waiting = false;
       this.ownerPid = null;
-      console.error(`[deeporax-browser-mcp] bridge listening on ws://127.0.0.1:${port}`);
+      console.error(
+        `[deeporax-browser-mcp] bridge listening on ws://127.0.0.1:${port} session=${this.sessionId}`
+      );
     });
 
     this.wss.on("connection", (socket, req) => {
@@ -371,6 +399,7 @@ export class ExtensionBridge {
       connectedVia: this.peerSocket?.readyState === 1 ? "peer" : "direct",
       ownerPid: this.ownerPid,
       peers: this.peers.size,
+      sessionId: this.sessionId,
     };
   }
 
@@ -396,7 +425,13 @@ export class ExtensionBridge {
     }
 
     const id = `req_${process.pid}_${Date.now()}_${++this.seq}`;
-    const request: BridgeRequest = { id, method, params };
+    // Stamp every call so the extension keeps this chat's tabs/group separate
+    // from every other MCP process sharing the same browser bridge.
+    const request: BridgeRequest = {
+      id,
+      method,
+      params: { ...params, sessionId: this.sessionId },
+    };
 
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {

@@ -40,7 +40,7 @@ async function main() {
         "Typical loop: browser_status → browser_navigate → browser_snapshot → act with refs (browser_click / browser_type) → browser_snapshot again.",
         "Prefer browser_snapshot over browser_screenshot when you need to interact. Use screenshot to verify visual state.",
         "Element refs look like e1, e2 from the latest snapshot of that tab. Snapshots invalidate after navigation or DOM changes; re-snapshot before retrying a failed click/type.",
-        "Session isolation: agent tabs live in a Chrome tab group titled 'Deeporax'. navigate and tabs action=new put tabs there automatically. Prefer omitting tabId so tools use the session tab; do not hard-code stale tab ids across calls.",
+        "Session isolation: each MCP chat process has its own sessionId, current tab, and Chrome tab group (distinct color). Another open chat cannot steal or reuse this session's tabs. navigate/tabs open work inside this session only. Prefer omitting tabId. Group title is a short topic from the URL or optional groupLabel.",
         "Anti-loop rules: (1) If a tool says 'No tab with id', never retry that id — omit tabId or call browser_tabs action=list for a fresh one. (2) If navigate returns navigated:false or the snapshot URL is unchanged, stop retrying the same navigate; open newTab:true or pick a different tab. (3) If a result has trusted:false, close DevTools on that tab and do not keep typing — React/SPAs ignore synthetic input. (4) Do not call browser_wait for more than ~5s of idle time; prefer snapshot to check state. (5) After two identical failures, change approach or report blocked — do not burn the turn replaying the same call.",
         `If tools fail with 'extension not connected', tell the user to load the unpacked extension from: ${extPath}`,
         "Chrome → chrome://extensions → Developer mode → Load unpacked → select that folder. Keep Chrome open. After updating the extension, reload it on chrome://extensions so new permissions (tabGroups) apply.",
@@ -53,6 +53,7 @@ async function main() {
   // Expose path as a resource-ish log once (stderr only; never stdout for stdio MCP)
   console.error(`[deeporax-browser-mcp] extension path: ${extPath}`);
   console.error(`[deeporax-browser-mcp] bridge port: ${port}`);
+  console.error(`[deeporax-browser-mcp] session id: ${bridge.sessionId}`);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
