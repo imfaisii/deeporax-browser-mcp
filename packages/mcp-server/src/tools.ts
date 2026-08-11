@@ -75,7 +75,9 @@ export function registerTools(server: McpServer): void {
             "This chat only owns tabs in its own group (sessionId on status). " +
             "Omit tabId to stay on this session's tab. If there is no session tab yet, " +
             "browser_navigate opens one. Never reuse another chat's tab id. " +
-            "trusted:false means close DevTools before typing.",
+            "trusted:false means close DevTools before typing. " +
+            "blockHeavyAssets on activeTab (extension popup) skips Image/Media/Font " +
+            "so pages load faster while HTML/DOM stay available for snapshots.",
         });
       } catch (err) {
         return errorResult(err);

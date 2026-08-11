@@ -29,7 +29,7 @@ const COPY: Record<Status, { headline: string; detail: string }> = {
 const el = <T extends HTMLElement>(id: string) =>
   document.getElementById(id) as T | null;
 
-function paint(status: Status, url: string) {
+function paint(status: Status, url: string, blockHeavy: boolean) {
   document.body.dataset.state = status;
 
   const icon = el("beacon-icon");
@@ -54,6 +54,12 @@ function paint(status: Status, url: string) {
         ? `Try asking your agent: <code>snapshot my current tab</code>`
         : `Start the server with <code>npx deeporax-browser-mcp</code>, then keep this window open.`;
   }
+
+  const toggle = el<HTMLInputElement>("block-heavy");
+  if (toggle && toggle.checked !== blockHeavy) {
+    toggle.checked = blockHeavy;
+    toggle.setAttribute("aria-checked", blockHeavy ? "true" : "false");
+  }
 }
 
 async function refresh() {
@@ -61,15 +67,16 @@ async function refresh() {
     const res = await chrome.runtime.sendMessage({ type: "get-status" });
     paint(
       (res?.status as Status) ?? "disconnected",
-      res?.url ?? "ws://127.0.0.1:17373"
+      res?.url ?? "ws://127.0.0.1:17373",
+      Boolean(res?.blockHeavyAssets)
     );
   } catch {
-    paint("disconnected", "ws://127.0.0.1:17373");
+    paint("disconnected", "ws://127.0.0.1:17373", true);
   }
 }
 
 el("reconnect")?.addEventListener("click", async () => {
-  paint("connecting", "");
+  paint("connecting", "", el<HTMLInputElement>("block-heavy")?.checked ?? false);
   await chrome.runtime.sendMessage({ type: "reconnect" });
   setTimeout(() => void refresh(), 400);
 });
@@ -77,6 +84,30 @@ el("reconnect")?.addEventListener("click", async () => {
 el("brand")?.addEventListener("click", () => openSite("/", "popup_wordmark"));
 el("site")?.addEventListener("click", () => openSite("/", "popup_footer"));
 el("docs")?.addEventListener("click", () => openRepo());
+
+const blockToggle = el<HTMLInputElement>("block-heavy");
+blockToggle?.addEventListener("change", async () => {
+  const enabled = Boolean(blockToggle.checked);
+  blockToggle.setAttribute("aria-checked", enabled ? "true" : "false");
+  blockToggle.disabled = true;
+  try {
+    const res = await chrome.runtime.sendMessage({
+      type: "set-block-heavy-assets",
+      enabled,
+    });
+    const on = Boolean(res?.blockHeavyAssets ?? enabled);
+    blockToggle.checked = on;
+    blockToggle.setAttribute("aria-checked", on ? "true" : "false");
+  } catch {
+    blockToggle.checked = !enabled;
+    blockToggle.setAttribute(
+      "aria-checked",
+      blockToggle.checked ? "true" : "false"
+    );
+  } finally {
+    blockToggle.disabled = false;
+  }
+});
 
 const version = el("version");
 if (version) version.textContent = `v${chrome.runtime.getManifest().version}`;

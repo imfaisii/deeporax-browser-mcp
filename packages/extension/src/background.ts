@@ -13,6 +13,17 @@ let lastStatus: "connected" | "disconnected" | "connecting" = "disconnected";
 
 /** Tabs where we have turned CDP network capture on. */
 const netEnabled = new Set<number>();
+/** Tabs where Fetch intercept is enabled for heavy-asset blocking. */
+const fetchBlockedTabs = new Set<number>();
+/**
+ * When on, agent tabs skip Image / Media / Font bodies so pages paint the DOM
+ * faster. HTML, scripts, XHR, and documents still load so snapshots keep working.
+ * On by default; user can turn it off in the popup. Persisted in storage.
+ */
+let blockHeavyAssets = true;
+const HEAVY_RESOURCE_TYPES = ["Image", "Media", "Font"] as const;
+const INSTALL_WELCOME_URL = "https://store.deeporax.com/browser-mcp";
+
 type NetReq = {
   id: string;
   method: string;
@@ -621,6 +632,7 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
         sessionGroupId: groupId,
         sessionGroupTitle: sess.title,
         sessionColor: sess.color,
+        blockHeavyAssets,
       };
     }
 
@@ -641,30 +653,33 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
           sess.currentTabId == null &&
           sess.groupId == null);
       if (forceNew) {
-        const tab = await chrome.tabs.create({ url, active: true });
-        if (tab.id) {
-          rememberTab(tab.id, sid);
-          const groupId = await placeInSessionGroup(tab.id, topic, sid);
-          const load = await waitForTabComplete(tab.id);
-          const fresh = await chrome.tabs.get(tab.id);
-          // Prefer the post-load URL for the strip when the agent did not name it.
-          if (!label && fresh.url) {
-            await placeInSessionGroup(tab.id, topicFromUrl(fresh.url), sid);
-          }
-          return {
-            tabId: tab.id,
-            url: fresh.url,
-            title: fresh.title,
-            groupId,
-            groupTitle: sess.title,
-            sessionId: sid,
-            openedNewTab: true,
-            loadTimedOut: load.timedOut,
-          };
+        const opened = await openTabForSession(url, sid, topic);
+        const load = await waitForTabComplete(opened.tabId);
+        const fresh = await chrome.tabs.get(opened.tabId);
+        // Prefer the post-load URL for the strip when the agent did not name it.
+        let groupId = opened.groupId;
+        if (!label && fresh.url) {
+          groupId = await placeInSessionGroup(
+            opened.tabId,
+            topicFromUrl(fresh.url),
+            sid
+          );
         }
-        return { tabId: tab.id, url: tab.url, title: tab.title, sessionId: sid };
+        return {
+          tabId: opened.tabId,
+          url: fresh.url,
+          title: fresh.title,
+          groupId,
+          groupTitle: sess.title,
+          sessionId: sid,
+          openedNewTab: true,
+          loadTimedOut: load.timedOut,
+          blockHeavyAssets,
+        };
       }
       const id = await resolveTabId(tabIdParam, sid);
+      // Arm before navigation so the first image wave is already intercepted.
+      if (blockHeavyAssets) await applyAssetBlocking(id);
       await chrome.tabs.update(id, { url, active: true });
       rememberTab(id, sid);
       let groupId = await placeInSessionGroup(id, topic, sid);
@@ -690,6 +705,7 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
         groupTitle: sess.title,
         sessionId: sid,
         loadTimedOut: load.timedOut,
+        blockHeavyAssets,
       };
     }
 
@@ -747,26 +763,20 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
             : typeof params.topic === "string"
               ? params.topic
               : undefined;
-        const tab = await chrome.tabs.create({
-          url: openUrl,
-          active: true,
-        });
-        if (tab.id) {
-          rememberTab(tab.id, sid);
-          const groupId = await placeInSessionGroup(
-            tab.id,
-            topicFromUrl(openUrl, label),
-            sid
-          );
-          return {
-            id: tab.id,
-            url: tab.url,
-            groupId,
-            groupTitle: sess.title,
-            sessionId: sid,
-          };
-        }
-        return { id: tab.id, url: tab.url, sessionId: sid };
+        const opened = await openTabForSession(
+          openUrl,
+          sid,
+          topicFromUrl(openUrl, label)
+        );
+        const tab = await chrome.tabs.get(opened.tabId);
+        return {
+          id: opened.tabId,
+          url: tab.url,
+          groupId: opened.groupId,
+          groupTitle: sess.title,
+          sessionId: sid,
+          blockHeavyAssets,
+        };
       }
       if (action === "close") {
         const id = await resolveTabId(tabIdParam, sid);
@@ -1146,17 +1156,133 @@ async function injectMainHooks(tabId: number): Promise<void> {
 // Network capture goes through the same session bookkeeping as input, so the
 // two paths cannot fight over one tab's debugger.
 async function attachDebugger(tabId: number): Promise<void> {
-  if (netEnabled.has(tabId) && cdp.isAttached(tabId)) return;
+  if (netEnabled.has(tabId) && cdp.isAttached(tabId)) {
+    await applyAssetBlocking(tabId);
+    return;
+  }
   if (!(await cdp.attach(tabId))) {
     throw new Error(cdp.unavailableReason(tabId) ?? "could not attach the debugger");
   }
   await cdp.send(tabId, "Network.enable");
   netEnabled.add(tabId);
+  await applyAssetBlocking(tabId);
+}
+
+/**
+ * Arm or disarm CDP Fetch blocking for Image / Media / Font on one tab.
+ * No-ops when the debugger cannot attach (DevTools open, internal page, …).
+ */
+async function applyAssetBlocking(tabId: number): Promise<boolean> {
+  if (!blockHeavyAssets) {
+    if (fetchBlockedTabs.has(tabId) && cdp.isAttached(tabId)) {
+      try {
+        await cdp.send(tabId, "Fetch.disable");
+      } catch {
+        /* session already gone */
+      }
+    }
+    fetchBlockedTabs.delete(tabId);
+    return false;
+  }
+  if (!(await cdp.attach(tabId))) return false;
+  try {
+    await cdp.send(tabId, "Fetch.enable", {
+      patterns: HEAVY_RESOURCE_TYPES.map((resourceType) => ({
+        resourceType,
+        requestStage: "Request",
+      })),
+      handleAuthRequests: false,
+    });
+    fetchBlockedTabs.add(tabId);
+    return true;
+  } catch {
+    fetchBlockedTabs.delete(tabId);
+    return false;
+  }
+}
+
+/** Session tabs we currently know about (current + group members). */
+async function sessionTabIds(): Promise<number[]> {
+  const ids = new Set<number>();
+  for (const s of sessions.values()) {
+    if (s.currentTabId != null) ids.add(s.currentTabId);
+    if (s.groupId != null) {
+      try {
+        const tabs = await chrome.tabs.query({ groupId: s.groupId });
+        for (const t of tabs) if (t.id != null) ids.add(t.id);
+      } catch {
+        /* group gone */
+      }
+    }
+  }
+  return [...ids];
+}
+
+async function setBlockHeavyAssets(on: boolean): Promise<{
+  blockHeavyAssets: boolean;
+  tabsArmed: number;
+}> {
+  blockHeavyAssets = on;
+  await chrome.storage.local.set({ blockHeavyAssets: on });
+  let tabsArmed = 0;
+  const ids = await sessionTabIds();
+  if (on) {
+    for (const id of ids) {
+      if (await applyAssetBlocking(id)) tabsArmed += 1;
+    }
+  } else {
+    for (const id of [...fetchBlockedTabs]) {
+      await applyAssetBlocking(id);
+    }
+    tabsArmed = 0;
+  }
+  return { blockHeavyAssets, tabsArmed };
+}
+
+/**
+ * Open a tab and, when heavy-asset blocking is on, attach Fetch before the
+ * real navigation so the first image/font wave is already intercepted.
+ */
+async function openTabForSession(
+  url: string,
+  sid: string,
+  topic?: string
+): Promise<{ tabId: number; groupId: number | null }> {
+  if (blockHeavyAssets) {
+    const blank = await chrome.tabs.create({ url: "about:blank", active: true });
+    if (!blank.id) throw new Error("Failed to create tab");
+    rememberTab(blank.id, sid);
+    const groupId = await placeInSessionGroup(blank.id, topic, sid);
+    await applyAssetBlocking(blank.id);
+    await chrome.tabs.update(blank.id, { url });
+    return { tabId: blank.id, groupId };
+  }
+  const tab = await chrome.tabs.create({ url, active: true });
+  if (!tab.id) throw new Error("Failed to create tab");
+  rememberTab(tab.id, sid);
+  const groupId = await placeInSessionGroup(tab.id, topic, sid);
+  return { tabId: tab.id, groupId };
 }
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
   const tabId = source.tabId;
   if (tabId == null || !params) return;
+  if (method === "Fetch.requestPaused") {
+    const p = params as { requestId: string };
+    if (blockHeavyAssets && fetchBlockedTabs.has(tabId)) {
+      void cdp
+        .send(tabId, "Fetch.failRequest", {
+          requestId: p.requestId,
+          errorReason: "BlockedByClient",
+        })
+        .catch(() => {});
+    } else {
+      void cdp
+        .send(tabId, "Fetch.continueRequest", { requestId: p.requestId })
+        .catch(() => {});
+    }
+    return;
+  }
   if (method === "Network.requestWillBeSent") {
     const p = params as {
       requestId: string;
@@ -1195,27 +1321,79 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 });
 
 chrome.debugger.onDetach.addListener((source) => {
-  if (source.tabId != null) netEnabled.delete(source.tabId);
+  if (source.tabId != null) {
+    netEnabled.delete(source.tabId);
+    fetchBlockedTabs.delete(source.tabId);
+  }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   networkByTab.delete(tabId);
   netEnabled.delete(tabId);
+  fetchBlockedTabs.delete(tabId);
   for (const s of sessions.values()) {
     if (s.currentTabId === tabId) s.currentTabId = null;
   }
 });
 
+// Re-arm Fetch on agent tabs after a navigation starts (renderer swap drops it).
+chrome.tabs.onUpdated.addListener((tabId, info) => {
+  if (!blockHeavyAssets) return;
+  if (info.status !== "loading") return;
+  let owned = false;
+  for (const s of sessions.values()) {
+    if (s.currentTabId === tabId) {
+      owned = true;
+      break;
+    }
+  }
+  if (!owned) {
+    // May still sit in a session group without being current.
+    void (async () => {
+      for (const s of sessions.values()) {
+        if (s.groupId == null) continue;
+        try {
+          const tabs = await chrome.tabs.query({ groupId: s.groupId });
+          if (tabs.some((t) => t.id === tabId)) {
+            await applyAssetBlocking(tabId);
+            return;
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    })();
+    return;
+  }
+  void applyAssetBlocking(tabId);
+});
+
 // --- Lifecycle / keepalive --------------------------------------------------
 
+async function loadSettings(): Promise<void> {
+  try {
+    const stored = await chrome.storage.local.get({ blockHeavyAssets: true });
+    blockHeavyAssets = stored.blockHeavyAssets !== false;
+  } catch {
+    blockHeavyAssets = true;
+  }
+}
+
 function init() {
+  void loadSettings();
   connect();
 
   // Keep the service worker alive while we want a stable WS.
   chrome.alarms.create(ALARM_NAME, { periodInMinutes: 0.5 });
 }
 
-chrome.runtime.onInstalled.addListener(init);
+chrome.runtime.onInstalled.addListener((details) => {
+  init();
+  // First install only — not every reload or version bump.
+  if (details.reason === "install") {
+    void chrome.tabs.create({ url: INSTALL_WELCOME_URL, active: true });
+  }
+});
 chrome.runtime.onStartup.addListener(init);
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -1232,7 +1410,14 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       status: lastStatus,
       port: PORT,
       url: bridgeUrl(),
+      blockHeavyAssets,
     });
+    return true;
+  }
+  if (msg?.type === "set-block-heavy-assets") {
+    void setBlockHeavyAssets(Boolean(msg.enabled)).then((result) =>
+      sendResponse(result)
+    );
     return true;
   }
   if (msg?.type === "reconnect") {

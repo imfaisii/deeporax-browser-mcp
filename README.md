@@ -420,6 +420,15 @@ you can: they survive markup churn better and are what the click and type tools
 expect. **Refs go stale after navigation**, so snapshot again after the page
 changes.
 
+## Block heavy assets
+
+**On by default.** Agent tabs skip images, video/audio, and web fonts so pages
+reach a usable DOM faster. HTML, scripts, stylesheets, and XHR still load, so
+snapshots and clicks keep working. Turn it off from the extension popup if you
+need full media. The setting persists across browser restarts and applies to
+Deeporax session tabs only (not every tab in Chrome). Close DevTools on a tab
+if blocking does not arm — the debugger must attach for the filter to run.
+
 ## Agent control overlay
 
 You can always see when an agent is driving a tab, and stop it.

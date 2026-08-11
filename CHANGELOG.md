@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Popup toggle **Block heavy assets** (on by default; user can turn off): agent
+  tabs fail Image, Media, and Font requests via CDP Fetch so pages reach a
+  usable DOM faster. Document, script, XHR/fetch, and stylesheets still load.
+  Preference is stored in `chrome.storage.local` and re-armed on navigation for
+  session tabs
+- Opening the extension for the first time opens
+  `https://store.deeporax.com/browser-mcp`
 - Each chat gets its own `sessionId`, current tab, and Chrome tab group
   (distinct color). Isolation keys off `CLAUDE_CODE_SESSION_ID` (and similar
   host env vars) so two chats sharing one MCP process still stay separate; falls
