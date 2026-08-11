@@ -359,9 +359,10 @@ You should see `connected: true` and a DOM snapshot with refs like `e1`, `e2`.
 
 | Tool | Purpose |
 |------|---------|
-| `browser_snapshot` | Accessibility-style DOM with refs `e1`, `e2`, … Start here |
-| `browser_screenshot` | PNG of the visible viewport |
+| `browser_snapshot` | Accessibility-style DOM with refs `e1`, `e2`, … Lists repeated patterns |
+| `browser_screenshot` | PNG of the visible viewport (verify visuals only; not for click loops) |
 | `browser_find` | Search the page by text or regex, returns refs |
+| `browser_act_matches` | Click/hover/type every match of a pattern in one call |
 | `browser_get_text` / `browser_get_html` | Read raw content |
 | `browser_get_bounding_box` | Element box in CSS pixels |
 
@@ -412,13 +413,18 @@ You should see `connected: true` and a DOM snapshot with refs like `e1`, `e2`.
 ### The loop that works
 
 ```
-browser_navigate  →  browser_snapshot  →  browser_click / browser_type  →  browser_snapshot
+browser_navigate  →  browser_snapshot  →  browser_click / browser_type / browser_act_matches  →  browser_snapshot (only if DOM changed)
 ```
 
 Snapshots hand back refs like `e1`, `e2`. Use those instead of CSS selectors when
 you can: they survive markup churn better and are what the click and type tools
 expect. **Refs go stale after navigation**, so snapshot again after the page
 changes.
+
+When the snapshot shows **REPEATED PATTERNS** (many identical buttons or links),
+call `browser_act_matches` once — for example click every "Reply" — instead of
+screenshot → click → screenshot for each row. Prefer snapshot over screenshot
+for finding controls; screenshots are for visual checks only.
 
 ## Block heavy assets
 

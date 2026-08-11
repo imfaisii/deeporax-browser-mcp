@@ -235,7 +235,13 @@ function isVisible(el: Element): boolean {
 export function buildSnapshot(opts: {
   interestingOnly?: boolean;
   maxElements?: number;
-}): { text: string; refs: Record<string, RefEntry>; url: string; title: string } {
+}): {
+  text: string;
+  refs: Record<string, RefEntry>;
+  patterns: Array<{ role: string; name: string; count: number; refs: string[] }>;
+  url: string;
+  title: string;
+} {
   const interestingOnly = opts.interestingOnly !== false;
   const refMeta: Record<string, RefEntry> = {};
 
@@ -301,8 +307,42 @@ export function buildSnapshot(opts: {
     lines.push(
       `  - NOTE: showing ${shown.length} of ${filtered.length} elements. ` +
         `${filtered.length - shown.length} were left out. ` +
-        "Raise maxElements, or use browser_find to locate a specific element."
+        "Raise maxElements, or use browser_find / browser_act_matches for bulk work."
     );
+  }
+
+  // Surface repeated controls so the agent can one-shot them instead of
+  // clicking e1, snapshot, e2, snapshot in a dull loop.
+  const patternMap = new Map<
+    string,
+    { role: string; name: string; count: number; refs: string[] }
+  >();
+  for (const [ref, meta] of Object.entries(refMeta)) {
+    const name = (meta.name || "").trim();
+    if (!name) continue;
+    const key = `${meta.role}\0${name.toLowerCase()}`;
+    let g = patternMap.get(key);
+    if (!g) {
+      g = { role: meta.role, name, count: 0, refs: [] };
+      patternMap.set(key, g);
+    }
+    g.count += 1;
+    if (g.refs.length < 40) g.refs.push(ref);
+  }
+  const patterns = [...patternMap.values()]
+    .filter((p) => p.count >= 2)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 20);
+
+  if (patterns.length) {
+    lines.push("  - REPEATED PATTERNS (prefer browser_act_matches once, not N clicks):");
+    for (const p of patterns) {
+      const sample = p.refs.slice(0, 8).join(", ");
+      const more = p.count > p.refs.length ? ` +${p.count - p.refs.length} more` : "";
+      lines.push(
+        `    · ${p.role} "${p.name.replace(/"/g, '\\"')}" ×${p.count} [${sample}${more}]`
+      );
+    }
   }
 
   sweepRefs();
@@ -310,6 +350,7 @@ export function buildSnapshot(opts: {
   return {
     text: lines.join("\n"),
     refs: refMeta,
+    patterns,
     url: location.href,
     title: document.title,
   };
@@ -355,6 +396,94 @@ function resolveEl(params: Record<string, unknown>): Element {
   }
 
   throw new Error("Provide either ref (from snapshot) or selector");
+}
+
+type MatchHit = {
+  ref?: string;
+  role: string;
+  name: string;
+  selector: string;
+  text: string;
+};
+
+function findMatches(params: Record<string, unknown>): {
+  query: string;
+  count: number;
+  matches: MatchHit[];
+  exactNameCount?: number;
+} {
+  const query = String(params.query ?? "");
+  if (!query) throw new Error("query is required");
+  const roleFilter =
+    typeof params.role === "string" && params.role.trim()
+      ? params.role.trim().toLowerCase()
+      : null;
+  const exactName = Boolean(params.exactName);
+  let re: RegExp | null = null;
+  if (params.regex) {
+    re = new RegExp(query, params.caseSensitive ? "" : "i");
+  }
+  const matches: MatchHit[] = [];
+  const qLower = query.toLowerCase();
+
+  const pushHit = (hit: MatchHit) => {
+    if (roleFilter && hit.role.toLowerCase() !== roleFilter) return;
+    if (exactName) {
+      if (hit.name.trim().toLowerCase() !== qLower) return;
+    }
+    matches.push(hit);
+  };
+
+  // Prefer live refs from last snapshot
+  const refs = window.__deeporaxRefs;
+  if (refs && refs.size) {
+    for (const [ref, weak] of refs) {
+      const el = weak.deref();
+      if (!el || !el.isConnected) continue;
+      const role = roleOf(el);
+      const name = nameOf(el);
+      const text = ((el as HTMLElement).innerText || el.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim();
+      const hay = `${role} ${name} ${text}`;
+      const ok = re
+        ? re.test(hay)
+        : hay.toLowerCase().includes(qLower);
+      if (ok) {
+        pushHit({
+          ref,
+          role,
+          name,
+          selector: inShadow(el) ? "" : cssPath(el),
+          text: text.slice(0, 160),
+        });
+      }
+    }
+  } else {
+    // Fallback: scan interesting nodes and assign ephemeral refs
+    const snap = buildSnapshot({ interestingOnly: true });
+    for (const [ref, meta] of Object.entries(snap.refs)) {
+      const hay = `${meta.role} ${meta.name}`;
+      const ok = re ? re.test(hay) : hay.toLowerCase().includes(qLower);
+      if (ok) {
+        pushHit({
+          ref,
+          role: meta.role,
+          name: meta.name,
+          selector: meta.selector,
+          text: meta.name,
+        });
+      }
+    }
+  }
+
+  const limit = Number(params.limit ?? 50);
+  return {
+    query,
+    count: matches.length,
+    matches: matches.slice(0, Math.max(1, Math.min(200, limit))),
+    ...(exactName ? { exactNameCount: matches.length } : {}),
+  };
 }
 
 /** Input types that hold no editable text, so writing to them is a mistake. */
@@ -654,59 +783,12 @@ export function handleDomMethod(
     }
 
     case "find": {
-      const query = String(params.query ?? "");
-      if (!query) throw new Error("query is required");
-      let re: RegExp | null = null;
-      if (params.regex) {
-        re = new RegExp(query, params.caseSensitive ? "" : "i");
-      }
-      const matches: Array<{
-        ref?: string;
-        role: string;
-        name: string;
-        selector: string;
-        text: string;
-      }> = [];
+      return findMatches(params);
+    }
 
-      // Prefer live refs from last snapshot
-      const refs = window.__deeporaxRefs;
-      if (refs && refs.size) {
-        for (const [ref, weak] of refs) {
-          const el = weak.deref();
-          if (!el || !el.isConnected) continue;
-          const role = roleOf(el);
-          const name = nameOf(el);
-          const text = ((el as HTMLElement).innerText || el.textContent || "").replace(/\s+/g, " ").trim();
-          const hay = `${role} ${name} ${text}`;
-          const ok = re ? re.test(hay) : hay.toLowerCase().includes(query.toLowerCase());
-          if (ok) {
-            matches.push({
-              ref,
-              role,
-              name,
-              selector: inShadow(el) ? "" : cssPath(el),
-              text: text.slice(0, 160),
-            });
-          }
-        }
-      } else {
-        // Fallback: scan interesting nodes and assign ephemeral refs
-        const snap = buildSnapshot({ interestingOnly: true });
-        for (const [ref, meta] of Object.entries(snap.refs)) {
-          const hay = `${meta.role} ${meta.name}`;
-          const ok = re ? re.test(hay) : hay.toLowerCase().includes(query.toLowerCase());
-          if (ok) {
-            matches.push({
-              ref,
-              role: meta.role,
-              name: meta.name,
-              selector: meta.selector,
-              text: meta.name,
-            });
-          }
-        }
-      }
-      return { query, count: matches.length, matches: matches.slice(0, Number(params.limit ?? 30)) };
+    case "list_matches": {
+      // Same as find; kept so bulk tools can call a stable name.
+      return findMatches(params);
     }
 
     case "click_xy": {

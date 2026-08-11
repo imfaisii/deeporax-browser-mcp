@@ -37,13 +37,15 @@ async function main() {
     {
       instructions: [
         "You control the user's real Chrome browser via the deeporax-browser-mcp extension.",
-        "Typical loop: browser_status → browser_navigate → browser_snapshot → act with refs (browser_click / browser_type) → browser_snapshot again.",
-        "Prefer browser_snapshot over browser_screenshot when you need to interact. Use screenshot to verify visual state.",
-        "Element refs look like e1, e2 from the latest snapshot of that tab. Snapshots invalidate after navigation or DOM changes; re-snapshot before retrying a failed click/type.",
-        "Session isolation: each MCP chat process has its own sessionId, current tab, and Chrome tab group (distinct color). Another open chat cannot steal or reuse this session's tabs. navigate/tabs open work inside this session only. Prefer omitting tabId. Group title is a short topic from the URL or optional groupLabel.",
-        "Anti-loop rules: (1) If a tool says 'No tab with id', never retry that id — omit tabId or call browser_tabs action=list for a fresh one. (2) If navigate returns navigated:false or the snapshot URL is unchanged, stop retrying the same navigate; open newTab:true or pick a different tab. (3) If a result has trusted:false, close DevTools on that tab and do not keep typing — React/SPAs ignore synthetic input. (4) Do not call browser_wait for more than ~5s of idle time; prefer snapshot to check state. (5) After two identical failures, change approach or report blocked — do not burn the turn replaying the same call.",
+        "Typical loop: browser_status → browser_navigate → browser_snapshot → act with refs (browser_click / browser_type) → browser_snapshot again only when the DOM changed.",
+        "Be pattern-smart, not screenshot-dull: Prefer browser_snapshot over browser_screenshot for interaction. Screenshots are for visual verification only — never for locating the next click in a loop.",
+        "When a snapshot lists REPEATED PATTERNS (same role+name many times), or you need the same action on many similar controls, call browser_act_matches once (query + action click|type|hover). Do not click e1, re-snapshot, click e2 repeatedly.",
+        "Use browser_batch for mixed sequences in one round-trip. Use browser_find to inspect matches without acting.",
+        "Element refs look like e1, e2 from the latest snapshot of that tab. Snapshots invalidate after navigation or DOM changes; re-snapshot before retrying a failed click/type, not after every successful one.",
+        "Session isolation: each MCP chat process has its own sessionId, current tab, and Chrome tab group (distinct color). Another open chat cannot steal or reuse this session's tabs. navigate/tabs open work inside this session only and stay in the background so they do not steal the user's focused tab. Prefer omitting tabId. Group title is a short topic from the URL or optional groupLabel.",
+        "Anti-loop rules: (1) If a tool says 'No tab with id', never retry that id — omit tabId or call browser_tabs action=list for a fresh one. (2) If navigate returns navigated:false or the snapshot URL is unchanged, stop retrying the same navigate; open newTab:true or pick a different tab. (3) If a result has trusted:false, close DevTools on that tab and do not keep typing — React/SPAs ignore synthetic input. (4) Do not call browser_wait for more than ~5s of idle time; prefer snapshot to check state. (5) After two identical failures, change approach or report blocked — do not burn the turn replaying the same call. (6) Never screenshot→click→screenshot for repetitive UI; collapse into browser_act_matches.",
         `If tools fail with 'extension not connected', tell the user to load the unpacked extension from: ${extPath}`,
-        "Chrome → chrome://extensions → Developer mode → Load unpacked → select that folder. Keep Chrome open. After updating the extension, reload it on chrome://extensions so new permissions (tabGroups) apply.",
+        "Chrome → chrome://extensions → Developer mode → Load unpacked → select that folder. Keep Chrome open. After updating the extension, reload it on chrome://extensions so new permissions (tabGroups, storage) apply.",
       ].join(" "),
     }
   );

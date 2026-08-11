@@ -200,7 +200,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_snapshot",
-    "Capture an accessibility-style snapshot of the page with element refs (e1, e2, ...) for use with click/type. Prefer this over screenshot when you need to interact. The full snapshot is also written under /tmp/deeporax-browser-mcp/snapshots (auto-pruned after 30m).",
+    "Capture an accessibility-style DOM snapshot with refs (e1, e2, …). Prefer this over screenshot for interaction. When the page has repeated controls, the snapshot lists REPEATED PATTERNS — use browser_act_matches once instead of N click+snapshot loops.",
     {
       tabId,
       maxElements: z
@@ -239,6 +239,14 @@ export function registerTools(server: McpServer): void {
               ? (result as { text: string }).text
               : JSON.stringify(result, null, 2);
 
+        const patterns =
+          typeof result === "object" &&
+          result !== null &&
+          "patterns" in result &&
+          Array.isArray((result as { patterns: unknown }).patterns)
+            ? (result as { patterns: unknown[] }).patterns
+            : [];
+
         let url: string | undefined;
         let title: string | undefined;
         try {
@@ -259,12 +267,18 @@ export function registerTools(server: McpServer): void {
             path: saved.path,
             bytes: saved.bytes,
             tmpRoot: TMP_ROOT,
+            patternCount: patterns.length,
             note: "Snapshot saved. Read the file, then call browser_clear_tmp or leave it (auto-pruned in 30m).",
           });
         }
 
+        const patternHint =
+          patterns.length > 0
+            ? `\n\n---\npatterns: ${patterns.length} repeated control group(s). Prefer browser_act_matches for bulk click/type instead of one-by-one.`
+            : "";
+
         return textResult(
-          `${text}\n\n---\nsaved: ${saved.path} (${saved.bytes} bytes)\ntmp: ${TMP_ROOT} (auto-prune 30m / max 40 files)`
+          `${text}${patternHint}\n\n---\nsaved: ${saved.path} (${saved.bytes} bytes)\ntmp: ${TMP_ROOT} (auto-prune 30m / max 40 files)`
         );
       } catch (err) {
         return errorResult(err);
@@ -655,17 +669,90 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_find",
-    "Search the latest snapshot (or page) for elements matching text/regex. Returns refs you can click/type.",
+    "Search the latest snapshot (or page) for elements matching text/regex. Returns refs. Prefer browser_act_matches when you would click/type every match.",
     {
       tabId,
       query: z.string().describe("Text or regex to search for"),
       regex: z.boolean().optional().describe("Treat query as RegExp"),
       caseSensitive: z.boolean().optional(),
-      limit: z.number().int().min(1).max(100).optional(),
+      role: z
+        .string()
+        .optional()
+        .describe('Optional role filter, e.g. "button", "link", "checkbox"'),
+      exactName: z
+        .boolean()
+        .optional()
+        .describe(
+          "If true, match only elements whose accessible name equals query (case-insensitive)"
+        ),
+      limit: z.number().int().min(1).max(200).optional(),
     },
     async (args) => {
       try {
         return textResult(await call("find", args));
+      } catch (err) {
+        return errorResult(err);
+      }
+    }
+  );
+
+  server.tool(
+    "browser_act_matches",
+    "Act on every element matching a text/role pattern in one call (click, hover, or type). Use when the UI repeats the same control (Reply, Follow, checkboxes, identical buttons) instead of screenshot/click loops. Takes a fresh snapshot, finds matches, and runs trusted CDP actions.",
+    {
+      tabId,
+      query: z
+        .string()
+        .describe(
+          'Accessible name / text to match, e.g. "Reply", "Follow", "Like". With exactName (default true) this is the full name.'
+        ),
+      action: z
+        .enum(["click", "hover", "type"])
+        .optional()
+        .describe("What to do on each match (default click)"),
+      text: z
+        .string()
+        .optional()
+        .describe('Text to type when action is "type"'),
+      role: z
+        .string()
+        .optional()
+        .describe('Optional role filter, e.g. "button" or "link"'),
+      exactName: z
+        .boolean()
+        .optional()
+        .describe(
+          "Default true: only exact accessible-name matches. Set false for substring match."
+        ),
+      regex: z.boolean().optional(),
+      caseSensitive: z.boolean().optional(),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .optional()
+        .describe("Max elements to act on (default 30, hard max 50)"),
+      delayMs: z
+        .number()
+        .int()
+        .min(0)
+        .max(2000)
+        .optional()
+        .describe("Pause between actions in ms (default 40)"),
+      stopOnError: z
+        .boolean()
+        .optional()
+        .describe("If true, stop at the first failure (default continue)"),
+      doubleClick: z.boolean().optional(),
+      tripleClick: z.boolean().optional(),
+      button: z.enum(["left", "right", "middle"]).optional(),
+      submit: z.boolean().optional(),
+    },
+    async (args) => {
+      try {
+        // Bulk work can take a while on long lists.
+        return textResult(await call("act_matches", args, 120_000));
       } catch (err) {
         return errorResult(err);
       }
@@ -890,13 +977,13 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_batch",
-    "Run multiple bridge methods sequentially in one round-trip (like Claude-in-Chrome browser_batch). Each action: { method, params }.",
+    "Run multiple bridge methods sequentially in one round-trip. Prefer browser_act_matches for repeated same-action clicks; use batch for mixed sequences (type A, click B, snapshot).",
     {
       tabId,
       actions: z
         .array(
           z.object({
-            method: z.string().describe("Bridge method name, e.g. click, type, snapshot"),
+            method: z.string().describe("Bridge method name, e.g. click, type, snapshot, act_matches"),
             params: z.record(z.unknown()).optional(),
           })
         )
@@ -905,7 +992,7 @@ export function registerTools(server: McpServer): void {
     },
     async (args) => {
       try {
-        return textResult(await call("batch", args));
+        return textResult(await call("batch", args, 120_000));
       } catch (err) {
         return errorResult(err);
       }

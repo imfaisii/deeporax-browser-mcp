@@ -941,6 +941,7 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
     case "get_text":
     case "get_html":
     case "find":
+    case "list_matches":
     case "highlight":
     case "file_upload":
     case "get_bounding_box":
@@ -961,10 +962,139 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
       await injectMainHooks(id);
       const result = await safeDom(id, method, params);
       if (method === "snapshot") {
-        const snap = result as { text: string; url: string; title: string };
-        return typeof snap === "string" ? snap : snap.text;
+        const snap = result as {
+          text?: string;
+          url?: string;
+          title?: string;
+          patterns?: unknown;
+        };
+        // Keep the readable tree as the main payload (agents parse text),
+        // and attach structured patterns for bulk tools without a second pass.
+        if (typeof snap === "string") return snap;
+        return {
+          text: snap.text,
+          url: snap.url,
+          title: snap.title,
+          patterns: snap.patterns ?? [],
+        };
       }
       return result;
+    }
+
+    /**
+     * One-shot bulk action on every element matching a text/role pattern.
+     * Use this instead of N separate clicks + snapshots when the UI repeats
+     * (Reply, Follow, checkbox rows, identical buttons, …).
+     */
+    case "act_matches": {
+      const id = await resolveTabId(tabIdParam, sid);
+      await assertScriptable(id);
+      await injectMainHooks(id);
+      // Fresh refs so matches stay valid for the bulk pass.
+      await safeDom(id, "snapshot", {
+        interestingOnly: params.interestingOnly !== false,
+        maxElements: params.maxElements ?? 400,
+      });
+      const found = (await safeDom(id, "find", {
+        query: params.query,
+        regex: params.regex,
+        caseSensitive: params.caseSensitive,
+        role: params.role,
+        exactName: params.exactName !== false,
+        limit: params.limit ?? 50,
+      })) as {
+        query: string;
+        count: number;
+        matches: Array<{ ref?: string; role: string; name: string; text: string }>;
+      };
+      const action = String(params.action ?? "click").toLowerCase();
+      if (!["click", "hover", "type"].includes(action)) {
+        throw new Error('action must be "click", "hover", or "type"');
+      }
+      if (action === "type" && params.text == null && params.value == null) {
+        throw new Error('action "type" requires text (or value)');
+      }
+      const max = Math.min(
+        Math.max(1, Number(params.limit ?? 30)),
+        50
+      );
+      const matches = (found.matches || []).slice(0, max);
+      const stopOnError = params.stopOnError === true;
+      const results: unknown[] = [];
+      let succeeded = 0;
+      let failed = 0;
+
+      const useTrusted = await cdp.attach(id);
+
+      for (const m of matches) {
+        if (!m.ref) {
+          results.push({ ok: false, name: m.name, error: "match has no ref" });
+          failed += 1;
+          if (stopOnError) break;
+          continue;
+        }
+        try {
+          let outcome: unknown;
+          const p: Record<string, unknown> = {
+            ref: m.ref,
+            button: params.button,
+            doubleClick: params.doubleClick,
+            tripleClick: params.tripleClick,
+            text: params.text ?? params.value,
+            submit: params.submit,
+            slowly: params.slowly,
+            clear: params.clear !== false,
+          };
+          if (useTrusted) {
+            if (action === "click") outcome = await interact.click(id, p);
+            else if (action === "hover") outcome = await interact.hover(id, p);
+            else outcome = await interact.type(id, p);
+          } else {
+            outcome = await syntheticFallback(
+              id,
+              action === "type" ? "type" : action === "hover" ? "hover" : "click",
+              p,
+              cdp.unavailableReason(id)
+            );
+          }
+          results.push({
+            ok: true,
+            ref: m.ref,
+            role: m.role,
+            name: m.name,
+            result: outcome,
+          });
+          succeeded += 1;
+          // Small gap so React/lists can settle between identical controls.
+          await new Promise((r) => setTimeout(r, Number(params.delayMs ?? 40)));
+        } catch (err) {
+          failed += 1;
+          results.push({
+            ok: false,
+            ref: m.ref,
+            role: m.role,
+            name: m.name,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          if (stopOnError) break;
+        }
+      }
+
+      return {
+        query: found.query,
+        action,
+        matchCount: found.count,
+        attempted: matches.length,
+        succeeded,
+        failed,
+        exactName: params.exactName !== false,
+        trusted: useTrusted,
+        results,
+        tip:
+          found.count > matches.length
+            ? `Matched ${found.count}; acted on first ${matches.length}. Raise limit (max 50) to do more.`
+            : undefined,
+      };
     }
 
     case "console": {

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `browser_act_matches`: one-shot click/hover/type on every element matching a
+  text/role pattern (for repeated Reply/Follow/checkbox UIs) instead of N
+  screenshot or click loops
+- Snapshots list **REPEATED PATTERNS** (role+name groups with counts and sample
+  refs) and MCP instructions steer agents toward snapshot + act_matches over
+  screenshot-driven loops
+- `browser_find` accepts optional `role` and `exactName` filters
 - Popup toggle **Block heavy assets** (on by default; user can turn off): agent
   tabs fail Image, Media, and Font requests via CDP Fetch so pages reach a
   usable DOM faster. Document, script, XHR/fetch, and stylesheets still load.
