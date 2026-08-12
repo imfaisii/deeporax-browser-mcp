@@ -2,18 +2,24 @@ import { openRepo, openSite } from "./links";
 
 type Status = "connected" | "connecting" | "disconnected";
 
-const COPY: Record<Status, { headline: string; detail: string }> = {
+const COPY: Record<
+  Status,
+  { headline: string; detail: string; chip: string }
+> = {
   connected: {
-    headline: "Connected",
+    headline: "Live",
     detail: "MCP client can drive this browser",
+    chip: "On",
   },
   connecting: {
-    headline: "Connecting…",
+    headline: "Connecting",
     detail: "Reaching local MCP server",
+    chip: "…",
   },
   disconnected: {
     headline: "Offline",
     detail: "Local MCP server not found",
+    chip: "Off",
   },
 };
 
@@ -25,6 +31,9 @@ function paint(status: Status, url: string, blockHeavy: boolean) {
 
   const headline = el("headline");
   if (headline) headline.textContent = COPY[status].headline;
+
+  const chipText = el("chip-text");
+  if (chipText) chipText.textContent = COPY[status].chip;
 
   const detail = el("detail");
   if (detail) {

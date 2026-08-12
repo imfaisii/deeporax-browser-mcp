@@ -6,10 +6,10 @@
     <title>Deeporax Browser MCP</title>
     <style>
       /*
-        Tokens from deeporax.com: greenish ink on warm bone paper, one acid
-        accent, hard offset shadows (no blur). System fonts only — extensions
-        cannot fetch remote faces under CSP, and shipping webfonts is not worth
-        the weight in a 320px panel.
+        Print-block instrument panel.
+        Tokens mirror deeporax.com: greenish ink on warm bone paper, one acid
+        accent, hard offset shadows (no blur). System fonts only — CSP blocks
+        remote faces, and webfonts are not worth the weight in a 312px panel.
       */
       :root {
         color-scheme: light dark;
@@ -17,34 +17,37 @@
         --ink-900: #15170f;
         --ink-600: #565b43;
         --ink-500: #71765c;
+        --ink-400: #94987e;
         --paper-0: #fdfcf7;
         --paper-1: #f6f4ea;
         --paper-2: #efecdd;
+        --paper-3: #e7e3d0;
 
         --acid-500: #b6e51f;
         --acid-400: #c9ef4a;
         --acid-ink: #2b3505;
+        --acid-wash: #eef8cd;
 
         --amber-600: #b06c00;
+        --amber-wash: #f3e4c2;
 
         --bg-app: var(--paper-1);
         --surface-card: var(--paper-0);
         --surface-inset: var(--paper-2);
-        /* Panel type is ~11–13px; mute rungs sit one step darker for AA. */
         --text-body: var(--ink-900);
         --text-secondary: var(--ink-600);
-        --text-faint: var(--ink-500);
+        --text-faint: var(--ink-400);
         --text-on-acid: var(--acid-ink);
         --border-hairline: rgba(21, 23, 15, 0.14);
         --border-strong: var(--ink-900);
         --status-warn: var(--amber-600);
         --status-off: var(--ink-500);
 
-        --fx-block: 2px 2px 0 rgba(21, 23, 15, 0.9);
-        --fx-block-sm: 1.5px 1.5px 0 rgba(21, 23, 15, 0.9);
+        --fx-block: 2px 2px 0 rgba(21, 23, 15, 0.92);
+        --fx-block-sm: 1.5px 1.5px 0 rgba(21, 23, 15, 0.92);
 
-        --radius-control: 6px;
-        --radius-card: 8px;
+        --radius-control: 7px;
+        --radius-card: 10px;
         --radius-pill: 999px;
 
         --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
@@ -61,15 +64,17 @@
           --ink-900: #f2f1e4;
           --ink-600: #9fa287;
           --ink-500: #8f937a;
+          --ink-400: #7f836a;
           --paper-0: #191c10;
           --paper-1: #121408;
           --paper-2: #212416;
-
+          --paper-3: #2a2d1c;
+          --acid-wash: #2e3a0b;
           --amber-600: #e3a83f;
-
-          --border-hairline: rgba(242, 241, 228, 0.16);
-          --fx-block: 2px 2px 0 rgba(0, 0, 0, 0.92);
-          --fx-block-sm: 1.5px 1.5px 0 rgba(0, 0, 0, 0.92);
+          --amber-wash: #382c12;
+          --border-hairline: rgba(242, 241, 228, 0.14);
+          --fx-block: 2px 2px 0 rgba(0, 0, 0, 0.94);
+          --fx-block-sm: 1.5px 1.5px 0 rgba(0, 0, 0, 0.94);
         }
       }
 
@@ -78,23 +83,43 @@
       }
 
       body {
-        width: 300px;
+        width: 312px;
         margin: 0;
         padding: 0;
-        background: var(--bg-app);
+        background:
+          radial-gradient(
+            circle at 1px 1px,
+            rgba(21, 23, 15, 0.045) 1px,
+            transparent 0
+          )
+          0 0 / 7px 7px,
+          var(--bg-app);
         color: var(--text-body);
         font: 400 12.5px/1.4 var(--sans);
         -webkit-font-smoothing: antialiased;
       }
 
-      /* ---------- header ---------- */
+      @media (prefers-color-scheme: dark) {
+        body {
+          background:
+            radial-gradient(
+              circle at 1px 1px,
+              rgba(242, 241, 228, 0.04) 1px,
+              transparent 0
+            )
+            0 0 / 7px 7px,
+            var(--bg-app);
+        }
+      }
+
+      /* ---------- masthead ---------- */
 
       header {
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 10px 12px;
-        border-bottom: 1px solid var(--border-hairline);
+        padding: 11px 12px 10px;
+        border-bottom: 2px solid var(--border-strong);
         background: var(--surface-card);
       }
 
@@ -123,19 +148,27 @@
 
       .word {
         font-size: 13.5px;
-        font-weight: 650;
-        letter-spacing: -0.02em;
+        font-weight: 700;
+        letter-spacing: -0.03em;
         white-space: nowrap;
       }
 
-      .kicker {
+      .badge {
+        display: inline-flex;
+        align-items: center;
         margin-left: auto;
+        padding: 3px 6px 2px;
+        border: 1.5px solid var(--border-strong);
+        border-radius: 5px;
+        background: var(--acid-500);
+        color: var(--text-on-acid);
         font-family: var(--mono);
-        font-size: 10px;
-        font-weight: 500;
-        letter-spacing: 0.02em;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
         text-transform: uppercase;
-        color: var(--text-faint);
+        line-height: 1.2;
+        box-shadow: var(--fx-block-sm);
         white-space: nowrap;
       }
 
@@ -147,60 +180,106 @@
         gap: 10px;
       }
 
-      /* Status: one hard card. Job of the whole popup. */
+      /* Status ticket — one hard print card. The whole job of the popup. */
       .status {
+        position: relative;
         display: grid;
-        grid-template-columns: 4px 1fr;
-        gap: 0 10px;
-        align-items: center;
-        min-height: 52px;
-        padding: 10px 11px 10px 0;
+        gap: 8px;
+        padding: 11px 12px 12px;
         background: var(--surface-card);
-        border: 1px solid var(--border-strong);
+        border: 2px solid var(--border-strong);
         border-radius: var(--radius-card);
         box-shadow: var(--fx-block);
       }
 
-      .rail {
-        align-self: stretch;
-        width: 4px;
-        margin: -10px 0 -10px 0;
-        border-radius: 0;
-        background: var(--status-off);
-        transition: background var(--dur-med) var(--ease-out);
+      .status-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
       }
-      [data-state="connected"] .rail {
+
+      .meta {
+        font-family: var(--mono);
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--text-faint);
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 7px 3px 6px;
+        border: 1.5px solid var(--border-strong);
+        border-radius: var(--radius-pill);
+        background: var(--surface-inset);
+        font-family: var(--mono);
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-secondary);
+        line-height: 1.2;
+      }
+      .chip-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        border: 1.25px solid var(--border-strong);
+        background: var(--status-off);
+        flex: none;
+      }
+
+      [data-state="connected"] .chip {
+        background: var(--acid-wash);
+        color: var(--text-on-acid);
+      }
+      [data-state="connected"] .chip-dot {
         background: var(--acid-500);
       }
-      [data-state="connecting"] .rail {
+      [data-state="connecting"] .chip {
+        background: var(--amber-wash);
+        color: var(--status-warn);
+      }
+      [data-state="connecting"] .chip-dot {
         background: var(--status-warn);
       }
 
-      .status-copy {
-        min-width: 0;
-        display: grid;
-        gap: 2px;
-      }
-
       .headline {
-        font-size: 13px;
-        font-weight: 650;
-        letter-spacing: -0.015em;
+        margin: 0;
+        font-size: 18px;
+        font-weight: 750;
+        letter-spacing: -0.035em;
+        line-height: 1.15;
       }
 
       .detail {
-        font-size: 11px;
+        margin: 0;
+        font-size: 11.5px;
         color: var(--text-secondary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        line-height: 1.35;
       }
 
       .endpoint {
+        display: inline-block;
         font-family: var(--mono);
-        font-size: 10.5px;
+        font-size: 11px;
+        font-weight: 600;
         font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
         color: var(--text-body);
+        background: var(--surface-inset);
+        border: 1px solid var(--border-hairline);
+        border-radius: 4px;
+        padding: 2px 6px;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: bottom;
       }
 
       /* ---------- preference ---------- */
@@ -211,8 +290,9 @@
         gap: 10px;
         padding: 9px 10px;
         background: var(--surface-card);
-        border: 1px solid var(--border-hairline);
+        border: 1.5px solid var(--border-strong);
         border-radius: var(--radius-control);
+        box-shadow: var(--fx-block-sm);
         cursor: pointer;
         user-select: none;
       }
@@ -227,12 +307,12 @@
       .pref-title {
         display: block;
         font-size: 12px;
-        font-weight: 620;
-        letter-spacing: -0.01em;
+        font-weight: 650;
+        letter-spacing: -0.015em;
       }
       .pref-hint {
         display: block;
-        margin-top: 1px;
+        margin-top: 2px;
         font-size: 10.5px;
         color: var(--text-secondary);
         line-height: 1.35;
@@ -241,7 +321,7 @@
       .switch {
         position: relative;
         flex: none;
-        width: 34px;
+        width: 36px;
         height: 20px;
       }
       .switch input {
@@ -255,9 +335,9 @@
         display: block;
         width: 100%;
         height: 100%;
-        border-radius: var(--radius-pill);
+        border-radius: 5px;
         background: var(--surface-inset);
-        border: 1px solid var(--border-strong);
+        border: 1.5px solid var(--border-strong);
         transition: background var(--dur-fast) var(--ease-out);
         pointer-events: none;
       }
@@ -268,16 +348,16 @@
         left: 2px;
         width: 14px;
         height: 14px;
-        border-radius: 50%;
+        border-radius: 3px;
         background: var(--surface-card);
-        border: 1px solid var(--border-strong);
+        border: 1.5px solid var(--border-strong);
         transition: transform var(--dur-fast) var(--ease-out);
       }
       .switch input:checked + .switch-track {
         background: var(--acid-500);
       }
       .switch input:checked + .switch-track::after {
-        transform: translateX(14px);
+        transform: translateX(16px);
         background: var(--paper-0);
       }
       .switch input:focus-visible + .switch-track {
@@ -288,19 +368,20 @@
       /* ---------- actions ---------- */
 
       .actions {
-        display: flex;
+        display: grid;
+        grid-template-columns: 1.35fr 1fr;
         gap: 7px;
       }
 
       button.act {
-        flex: 1;
         border-radius: var(--radius-control);
-        padding: 8px 10px;
-        font: 600 12px/1 var(--sans);
-        letter-spacing: -0.006em;
+        padding: 9px 10px;
+        font: 700 12px/1 var(--sans);
+        letter-spacing: -0.01em;
         cursor: pointer;
-        border: 1px solid var(--border-strong);
-        transition: transform var(--dur-fast) var(--ease-out),
+        border: 1.5px solid var(--border-strong);
+        transition:
+          transform var(--dur-fast) var(--ease-out),
           box-shadow var(--dur-fast) var(--ease-out),
           background var(--dur-fast) var(--ease-out);
       }
@@ -331,14 +412,14 @@
         background: var(--surface-inset);
       }
 
-      /* ---------- help ---------- */
+      /* ---------- help strip ---------- */
 
       .help {
         margin: 0;
         padding: 8px 10px;
         border-radius: var(--radius-control);
         background: var(--surface-inset);
-        border: 1px solid var(--border-hairline);
+        border: 1.5px dashed var(--border-hairline);
         font-size: 11px;
         color: var(--text-secondary);
       }
@@ -348,6 +429,7 @@
       .help code {
         font-family: var(--mono);
         font-size: 10px;
+        font-weight: 600;
         padding: 1px 4px;
         border-radius: 3px;
         background: var(--surface-card);
@@ -362,8 +444,8 @@
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        padding: 8px 12px;
-        border-top: 1px solid var(--border-hairline);
+        padding: 8px 12px 10px;
+        border-top: 1.5px solid var(--border-hairline);
         background: var(--surface-card);
       }
 
@@ -373,7 +455,7 @@
         padding: 2px 4px;
         margin: -2px -4px;
         border-radius: var(--radius-control);
-        font: 500 11px/1 var(--sans);
+        font: 600 11px/1 var(--sans);
         color: var(--text-faint);
         cursor: pointer;
       }
@@ -388,8 +470,10 @@
       .version {
         font-family: var(--mono);
         font-size: 10px;
+        font-weight: 600;
         color: var(--text-faint);
         font-variant-numeric: tabular-nums;
+        letter-spacing: 0.02em;
       }
 
       @media (prefers-reduced-motion: reduce) {
@@ -439,16 +523,20 @@
         </svg>
         <span class="word">Deeporax</span>
       </button>
-      <span class="kicker">Browser MCP</span>
+      <span class="badge">MCP</span>
     </header>
 
     <main>
       <section class="status" aria-live="polite">
-        <span class="rail" aria-hidden="true"></span>
-        <span class="status-copy">
-          <span class="headline" id="headline">Checking…</span>
-          <span class="detail" id="detail">Looking for local server</span>
-        </span>
+        <div class="status-top">
+          <span class="meta">Bridge</span>
+          <span class="chip" id="chip">
+            <span class="chip-dot" aria-hidden="true"></span>
+            <span id="chip-text">Offline</span>
+          </span>
+        </div>
+        <h1 class="headline" id="headline">Checking…</h1>
+        <p class="detail" id="detail">Looking for local server</p>
       </section>
 
       <label class="pref" for="block-heavy">

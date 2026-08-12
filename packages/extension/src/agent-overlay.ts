@@ -2,7 +2,7 @@
  * Visual "agent is controlling this tab" layer.
  *
  * - Hard acid frame around the viewport (print-block, no soft glow)
- * - Status pill with action text + Stop
+ * - Ticket-style status strip with action text + Stop
  * - Synthetic cursor that moves to each click target before the click fires
  *
  * Closed shadow root so page CSS cannot fight it. pointer-events:none
@@ -46,20 +46,22 @@ const CSS = `
 .frame {
   position: absolute;
   inset: 0;
-  border: 2px solid ${ACCENT};
-  box-shadow: inset 0 0 0 1px rgba(21, 23, 15, 0.35);
+  border: 2.5px solid ${ACCENT};
+  box-shadow:
+    inset 0 0 0 1px rgba(21, 23, 15, 0.45),
+    inset 0 0 0 4px rgba(182, 229, 31, 0.12);
   opacity: 0;
   transition: opacity 160ms ease, border-color 400ms ease;
 }
 .frame.on { opacity: 1; }
 @media (prefers-reduced-motion: no-preference) {
   .frame.on {
-    animation: edge 2.8s steps(2, end) infinite;
+    animation: edge 2.6s steps(2, end) infinite;
   }
 }
 @keyframes edge {
   0%, 100% { border-color: ${ACCENT}; }
-  50% { border-color: rgba(182, 229, 31, 0.55); }
+  50% { border-color: rgba(182, 229, 31, 0.5); }
 }
 @media (prefers-reduced-motion: reduce) {
   .frame { animation: none; }
@@ -72,34 +74,54 @@ const CSS = `
   transform: translateX(-50%) translateY(-10px);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 5px 5px 8px;
-  border-radius: 999px;
-  background: ${INK};
-  color: ${PAPER};
-  border: 1px solid ${INK};
-  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.55);
+  gap: 0;
+  padding: 0;
+  border-radius: 9px;
+  background: ${PAPER};
+  color: ${INK};
+  border: 2px solid ${INK};
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.72);
   opacity: 0;
   transition: opacity 160ms ease, transform 160ms ease;
   white-space: nowrap;
-  max-width: min(420px, 78vw);
+  max-width: min(440px, 84vw);
+  overflow: hidden;
 }
 .pill.on { opacity: 1; transform: translateX(-50%) translateY(0); }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px 6px 8px;
+  background: ${INK};
+  color: ${PAPER};
+  border-right: 2px solid ${INK};
+  flex: none;
+}
+.brand-tag {
+  font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.88;
+}
 .label {
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 48vw;
-  font-weight: 500;
-  letter-spacing: -0.01em;
+  max-width: 42vw;
+  padding: 0 10px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: ${INK};
 }
-.label span { opacity: 0.78; font-weight: 400; }
+.label span { opacity: 0.72; font-weight: 500; }
 .stop {
   pointer-events: auto;
   cursor: pointer;
-  border: 1px solid ${INK};
-  border-radius: 999px;
-  padding: 5px 12px;
-  font: 650 11.5px/1 ui-sans-serif, system-ui, sans-serif;
+  border: 0;
+  border-left: 2px solid ${INK};
+  border-radius: 0;
+  padding: 8px 13px;
+  font: 750 11.5px/1 ui-sans-serif, system-ui, sans-serif;
   color: ${INK};
   background: ${ACCENT};
   flex: none;
@@ -107,7 +129,7 @@ const CSS = `
   transition: background 120ms ease;
 }
 .stop:hover { background: ${ACCENT_HOVER}; }
-.stop:focus-visible { outline: 2px solid ${PAPER}; outline-offset: 2px; }
+.stop:focus-visible { outline: 2px solid ${PAPER}; outline-offset: -3px; }
 .mark { flex: none; display: block; }
 .cursor {
   position: absolute;
@@ -150,7 +172,7 @@ const CURSOR_SVG = `
 
 /** The Deeporax "Stack" mark, same geometry as deeporax.com and the popup. */
 const MARK_SVG = `
-<svg class="mark" width="14" height="14" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+<svg class="mark" width="13" height="13" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <rect x="3" y="3" width="42" height="42" rx="11" fill="${ACCENT}" stroke="${INK}" stroke-width="2.5"/>
   <rect x="19" y="19" width="15" height="15" rx="4" fill="none" stroke="${INK}" stroke-width="2.4"/>
   <rect x="13" y="13" width="17" height="17" rx="4.5" fill="${PAPER}" stroke="${INK}" stroke-width="2.7"/>
@@ -180,9 +202,9 @@ function ensure(): OverlayState {
   const pill = document.createElement("div");
   pill.className = "pill";
 
-  const mark = document.createElement("span");
-  mark.innerHTML = MARK_SVG;
-  mark.style.cssText = "flex:none;display:flex;";
+  const brand = document.createElement("div");
+  brand.className = "brand";
+  brand.innerHTML = `${MARK_SVG}<span class="brand-tag">Agent</span>`;
 
   const label = document.createElement("div");
   label.className = "label";
@@ -207,7 +229,7 @@ function ensure(): OverlayState {
   const ripple = document.createElement("div");
   ripple.className = "ripple";
 
-  pill.append(mark, label, stopBtn);
+  pill.append(brand, label, stopBtn);
   wrap.append(frame, pill, ripple, cursor);
   root.append(style, wrap);
   (document.body || document.documentElement).appendChild(host);
