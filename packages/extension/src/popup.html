@@ -6,97 +6,70 @@
     <title>Deeporax Browser MCP</title>
     <style>
       /*
-        Tokens mirrored from deeporax.com (src/styles/tokens/*.css):
-        greenish ink on warm bone paper, one acid accent, hard offset
-        "print block" shadows with no blur. Names match the site so the two
-        stay in sync when the brand moves.
-
-        Fonts are the system stack, not the site's Bricolage/Instrument pair.
-        Extensions cannot fetch remote fonts (CSP blocks it, and it would leak
-        a request per popup open), and bundling three families is not worth
-        ~200kB in a 320px panel. Weight and tracking are matched instead.
+        Tokens from deeporax.com: greenish ink on warm bone paper, one acid
+        accent, hard offset shadows (no blur). System fonts only — extensions
+        cannot fetch remote faces under CSP, and shipping webfonts is not worth
+        the weight in a 320px panel.
       */
       :root {
         color-scheme: light dark;
 
-        /* Base: greenish ink + warm bone paper */
         --ink-900: #15170f;
         --ink-600: #565b43;
         --ink-500: #71765c;
-        --ink-400: #94987e;
-        --ink-100: #e9eadf;
         --paper-0: #fdfcf7;
         --paper-1: #f6f4ea;
         --paper-2: #efecdd;
 
-        /* Accent: autopilot acid */
         --acid-500: #b6e51f;
         --acid-400: #c9ef4a;
-        --acid-600: #93c20a;
         --acid-ink: #2b3505;
 
-        /* Semantic status */
-        --green-600: #3f7d3a;
-        --green-100: #e0efdb;
         --amber-600: #b06c00;
-        --amber-100: #f6e9cc;
 
-        /* Aliases */
         --bg-app: var(--paper-1);
         --surface-card: var(--paper-0);
         --surface-inset: var(--paper-2);
-        /* The site's muted/faint ramps are tuned for 14px+ body copy. This panel
-           runs at 10.5-11.5px, so both step one rung darker to hold WCAG AA. */
+        /* Panel type is ~11–13px; mute rungs sit one step darker for AA. */
         --text-body: var(--ink-900);
         --text-secondary: var(--ink-600);
-        --text-muted: var(--ink-600);
         --text-faint: var(--ink-500);
         --text-on-acid: var(--acid-ink);
         --border-hairline: rgba(21, 23, 15, 0.14);
         --border-strong: var(--ink-900);
-        --status-live: var(--green-600);
-        --status-live-bg: var(--green-100);
         --status-warn: var(--amber-600);
-        --status-warn-bg: var(--amber-100);
         --status-off: var(--ink-500);
-        --status-off-bg: var(--ink-100);
 
-        /* Print-block shadows: hard offset, no blur */
         --fx-block: 2px 2px 0 rgba(21, 23, 15, 0.9);
         --fx-block-sm: 1.5px 1.5px 0 rgba(21, 23, 15, 0.9);
-        --fx-card: 0 1px 2px rgba(21, 23, 15, 0.05);
 
         --radius-control: 6px;
-        --radius-card: 10px;
+        --radius-card: 8px;
         --radius-pill: 999px;
 
         --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
         --dur-fast: 120ms;
-        --dur-med: 220ms;
+        --dur-med: 200ms;
+
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+          sans-serif;
       }
 
       @media (prefers-color-scheme: dark) {
         :root {
-          /* "Night print": same system on developer-dark paper */
           --ink-900: #f2f1e4;
           --ink-600: #9fa287;
-          /* Lightened from the site's #7f836a / #63674e for small-text AA. */
           --ink-500: #8f937a;
-          --ink-400: #7f836a;
-          --ink-100: #282b19;
           --paper-0: #191c10;
           --paper-1: #121408;
           --paper-2: #212416;
 
-          --green-600: #84cd74;
-          --green-100: #20301b;
           --amber-600: #e3a83f;
-          --amber-100: #382c12;
 
           --border-hairline: rgba(242, 241, 228, 0.16);
           --fx-block: 2px 2px 0 rgba(0, 0, 0, 0.92);
           --fx-block-sm: 1.5px 1.5px 0 rgba(0, 0, 0, 0.92);
-          --fx-card: 0 1px 2px rgba(0, 0, 0, 0.35);
         }
       }
 
@@ -105,13 +78,12 @@
       }
 
       body {
-        width: 320px;
+        width: 300px;
         margin: 0;
         padding: 0;
         background: var(--bg-app);
         color: var(--text-body);
-        font: 400 13px/1.45 "Instrument Sans", ui-sans-serif, system-ui,
-          -apple-system, "Segoe UI", Roboto, sans-serif;
+        font: 400 12.5px/1.4 var(--sans);
         -webkit-font-smoothing: antialiased;
       }
 
@@ -121,7 +93,7 @@
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 12px 14px;
+        padding: 10px 12px;
         border-bottom: 1px solid var(--border-hairline);
         background: var(--surface-card);
       }
@@ -132,8 +104,8 @@
         gap: 7px;
         background: none;
         border: 0;
-        padding: 3px 5px;
-        margin: -3px -5px;
+        padding: 2px 4px;
+        margin: -2px -4px;
         border-radius: var(--radius-control);
         font: inherit;
         color: inherit;
@@ -144,105 +116,80 @@
         outline: 2px solid var(--border-strong);
         outline-offset: 1px;
       }
-
       .lockup svg {
         display: block;
         flex: none;
       }
 
-      .wordmark {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-      }
-
       .word {
-        font-size: 15px;
-        font-weight: 640;
-        letter-spacing: -0.018em;
+        font-size: 13.5px;
+        font-weight: 650;
+        letter-spacing: -0.02em;
         white-space: nowrap;
-      }
-
-      /* The acid "AI" chip, centered on the cap-height band like the site. */
-      .chip {
-        font-size: 10px;
-        line-height: 1;
-        font-weight: 640;
-        letter-spacing: 0.01em;
-        padding: 1.5px 4.5px;
-        border-radius: var(--radius-control);
-        background: var(--acid-500);
-        color: var(--text-on-acid);
       }
 
       .kicker {
         margin-left: auto;
-        font-size: 10.5px;
+        font-family: var(--mono);
+        font-size: 10px;
         font-weight: 500;
-        letter-spacing: 0.01em;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
         color: var(--text-faint);
         white-space: nowrap;
       }
 
-      /* ---------- status ---------- */
+      /* ---------- main ---------- */
 
       main {
-        padding: 13px 14px 14px;
+        padding: 12px;
+        display: grid;
+        gap: 10px;
       }
 
+      /* Status: one hard card. Job of the whole popup. */
       .status {
-        display: flex;
+        display: grid;
+        grid-template-columns: 4px 1fr;
+        gap: 0 10px;
         align-items: center;
-        gap: 10px;
-        padding: 11px 12px;
+        min-height: 52px;
+        padding: 10px 11px 10px 0;
         background: var(--surface-card);
         border: 1px solid var(--border-strong);
         border-radius: var(--radius-card);
         box-shadow: var(--fx-block);
       }
 
-      .beacon {
-        width: 28px;
-        height: 28px;
-        flex: none;
-        border-radius: 50%;
-        display: grid;
-        place-items: center;
-        background: var(--status-off-bg);
-        color: var(--status-off);
-        transition: background var(--dur-med) var(--ease-out),
-          color var(--dur-med) var(--ease-out);
+      .rail {
+        align-self: stretch;
+        width: 4px;
+        margin: -10px 0 -10px 0;
+        border-radius: 0;
+        background: var(--status-off);
+        transition: background var(--dur-med) var(--ease-out);
       }
-      .beacon svg {
-        width: 14px;
-        height: 14px;
+      [data-state="connected"] .rail {
+        background: var(--acid-500);
       }
-
-      [data-state="connected"] .beacon {
-        background: var(--status-live-bg);
-        color: var(--status-live);
-      }
-      [data-state="connecting"] .beacon {
-        background: var(--status-warn-bg);
-        color: var(--status-warn);
+      [data-state="connecting"] .rail {
+        background: var(--status-warn);
       }
 
       .status-copy {
         min-width: 0;
-        flex: 1;
+        display: grid;
+        gap: 2px;
       }
 
       .headline {
-        display: block;
         font-size: 13px;
-        font-weight: 620;
-        letter-spacing: -0.012em;
+        font-weight: 650;
+        letter-spacing: -0.015em;
       }
 
       .detail {
-        display: block;
-        margin-top: 1px;
-        font-size: 11.5px;
+        font-size: 11px;
         color: var(--text-secondary);
         white-space: nowrap;
         overflow: hidden;
@@ -250,43 +197,19 @@
       }
 
       .endpoint {
-        font-family: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo,
-          monospace;
-        font-size: 11px;
+        font-family: var(--mono);
+        font-size: 10.5px;
         font-variant-numeric: tabular-nums;
-      }
-
-      .pulse {
-        position: relative;
-      }
-      [data-state="connecting"] .pulse::after {
-        content: "";
-        position: absolute;
-        inset: -3px;
-        border-radius: 50%;
-        border: 2px solid var(--status-warn);
-        opacity: 0;
-        animation: ring 1.5s var(--ease-out) infinite;
-      }
-      @keyframes ring {
-        0% {
-          opacity: 0.5;
-          transform: scale(0.85);
-        }
-        100% {
-          opacity: 0;
-          transform: scale(1.35);
-        }
+        color: var(--text-body);
       }
 
       /* ---------- preference ---------- */
 
       .pref {
         display: flex;
-        align-items: flex-start;
+        align-items: center;
         gap: 10px;
-        margin-top: 11px;
-        padding: 10px 11px;
+        padding: 9px 10px;
         background: var(--surface-card);
         border: 1px solid var(--border-hairline);
         border-radius: var(--radius-control);
@@ -303,14 +226,14 @@
       }
       .pref-title {
         display: block;
-        font-size: 12.5px;
+        font-size: 12px;
         font-weight: 620;
         letter-spacing: -0.01em;
       }
       .pref-hint {
         display: block;
-        margin-top: 2px;
-        font-size: 11px;
+        margin-top: 1px;
+        font-size: 10.5px;
         color: var(--text-secondary);
         line-height: 1.35;
       }
@@ -318,9 +241,8 @@
       .switch {
         position: relative;
         flex: none;
-        width: 36px;
-        height: 22px;
-        margin-top: 1px;
+        width: 34px;
+        height: 20px;
       }
       .switch input {
         position: absolute;
@@ -344,8 +266,8 @@
         position: absolute;
         top: 2px;
         left: 2px;
-        width: 16px;
-        height: 16px;
+        width: 14px;
+        height: 14px;
         border-radius: 50%;
         background: var(--surface-card);
         border: 1px solid var(--border-strong);
@@ -367,15 +289,14 @@
 
       .actions {
         display: flex;
-        gap: 8px;
-        margin-top: 11px;
+        gap: 7px;
       }
 
       button.act {
         flex: 1;
         border-radius: var(--radius-control);
-        padding: 8px 12px;
-        font: 600 12.5px/1 inherit;
+        padding: 8px 10px;
+        font: 600 12px/1 var(--sans);
         letter-spacing: -0.006em;
         cursor: pointer;
         border: 1px solid var(--border-strong);
@@ -383,7 +304,6 @@
           box-shadow var(--dur-fast) var(--ease-out),
           background var(--dur-fast) var(--ease-out);
       }
-      /* Press pushes the block into its own shadow. */
       button.act:active {
         transform: translate(1.5px, 1.5px);
         box-shadow: none;
@@ -414,23 +334,22 @@
       /* ---------- help ---------- */
 
       .help {
-        margin: 11px 0 0;
-        padding: 9px 11px;
+        margin: 0;
+        padding: 8px 10px;
         border-radius: var(--radius-control);
         background: var(--surface-inset);
         border: 1px solid var(--border-hairline);
-        font-size: 11.5px;
+        font-size: 11px;
         color: var(--text-secondary);
       }
       .help p {
         margin: 0;
       }
       .help code {
-        font-family: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo,
-          monospace;
-        font-size: 10.5px;
+        font-family: var(--mono);
+        font-size: 10px;
         padding: 1px 4px;
-        border-radius: 4px;
+        border-radius: 3px;
         background: var(--surface-card);
         border: 1px solid var(--border-hairline);
         color: var(--text-body);
@@ -443,7 +362,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        padding: 9px 14px;
+        padding: 8px 12px;
         border-top: 1px solid var(--border-hairline);
         background: var(--surface-card);
       }
@@ -451,16 +370,12 @@
       .link {
         background: none;
         border: 0;
-        padding: 3px 5px;
-        margin: -3px -5px;
+        padding: 2px 4px;
+        margin: -2px -4px;
         border-radius: var(--radius-control);
-        font: 500 11.5px/1 inherit;
-        color: var(--text-muted);
+        font: 500 11px/1 var(--sans);
+        color: var(--text-faint);
         cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        transition: color var(--dur-fast) var(--ease-out);
       }
       .link:hover {
         color: var(--text-body);
@@ -469,16 +384,10 @@
         outline: 2px solid var(--border-strong);
         outline-offset: 1px;
       }
-      .link svg {
-        width: 11px;
-        height: 11px;
-        opacity: 0.7;
-      }
 
       .version {
-        font-family: "Spline Sans Mono", ui-monospace, SFMono-Regular, Menlo,
-          monospace;
-        font-size: 10.5px;
+        font-family: var(--mono);
+        font-size: 10px;
         color: var(--text-faint);
         font-variant-numeric: tabular-nums;
       }
@@ -495,37 +404,50 @@
   <body data-state="disconnected">
     <header>
       <button class="lockup" id="brand" type="button" title="Open deeporax.com">
-        <!-- The Deeporax "Stack" mark, identical geometry to deeporax.com -->
-        <svg width="22" height="22" viewBox="0 0 48 48" aria-hidden="true">
-          <rect x="3" y="3" width="42" height="42" rx="11" fill="#b6e51f"
-            stroke="#15170f" stroke-width="2.5" />
-          <rect x="19" y="19" width="15" height="15" rx="4" fill="none"
-            stroke="#15170f" stroke-width="2.4" />
-          <rect x="13" y="13" width="17" height="17" rx="4.5" fill="#fdfcf7"
-            stroke="#15170f" stroke-width="2.7" />
+        <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+          <rect
+            x="3"
+            y="3"
+            width="42"
+            height="42"
+            rx="11"
+            fill="#b6e51f"
+            stroke="#15170f"
+            stroke-width="2.5"
+          />
+          <rect
+            x="19"
+            y="19"
+            width="15"
+            height="15"
+            rx="4"
+            fill="none"
+            stroke="#15170f"
+            stroke-width="2.4"
+          />
+          <rect
+            x="13"
+            y="13"
+            width="17"
+            height="17"
+            rx="4.5"
+            fill="#fdfcf7"
+            stroke="#15170f"
+            stroke-width="2.7"
+          />
           <polygon points="18.6,17 18.6,26 26,21.5" fill="#15170f" />
         </svg>
-        <span class="wordmark">
-          <span class="word">Deeporax</span>
-          <span class="chip">AI</span>
-        </span>
+        <span class="word">Deeporax</span>
       </button>
       <span class="kicker">Browser MCP</span>
     </header>
 
     <main>
       <section class="status" aria-live="polite">
-        <span class="beacon pulse" id="beacon" aria-hidden="true">
-          <svg id="beacon-icon" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
-            stroke-linejoin="round">
-            <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
-            <line x1="12" y1="2" x2="12" y2="12" />
-          </svg>
-        </span>
+        <span class="rail" aria-hidden="true"></span>
         <span class="status-copy">
           <span class="headline" id="headline">Checking…</span>
-          <span class="detail" id="detail">Looking for the MCP server</span>
+          <span class="detail" id="detail">Looking for local server</span>
         </span>
       </section>
 
@@ -533,8 +455,7 @@
         <span class="pref-copy">
           <span class="pref-title">Block heavy assets</span>
           <span class="pref-hint">
-            On by default. Skips images, video, and fonts on agent tabs so pages
-            load faster. HTML stays so the agent can still read and click.
+            Skip images, video, and fonts on agent tabs.
           </span>
         </span>
         <span class="switch">
@@ -552,26 +473,18 @@
         <button class="act primary" id="reconnect" type="button">
           Reconnect
         </button>
-        <button class="act ghost" id="docs" type="button">Setup guide</button>
+        <button class="act ghost" id="docs" type="button">Setup</button>
       </div>
 
       <div class="help">
         <p id="help-text">
-          Start the server with <code>npx deeporax-browser-mcp</code>, then keep
-          this window open.
+          Run <code>npx deeporax-browser-mcp</code>, then reopen this popup.
         </p>
       </div>
     </main>
 
     <footer>
-      <button class="link" id="site" type="button">
-        deeporax.com
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-          stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"
-          aria-hidden="true">
-          <path d="M7 17 17 7M9 7h8v8" />
-        </svg>
-      </button>
+      <button class="link" id="site" type="button">deeporax.com</button>
       <span class="version" id="version">v0.1.0</span>
     </footer>
 

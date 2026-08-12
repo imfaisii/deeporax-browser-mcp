@@ -2,27 +2,18 @@ import { openRepo, openSite } from "./links";
 
 type Status = "connected" | "connecting" | "disconnected";
 
-const ICONS: Record<Status, string> = {
-  // plug: bridge is live
-  connected: `<path d="M9 2v6M15 2v6"/><path d="M6 8h12v3a6 6 0 0 1-12 0V8Z"/><path d="M12 17v5"/>`,
-  // power: still negotiating
-  connecting: `<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>`,
-  // unplugged: nothing listening
-  disconnected: `<path d="m2 2 20 20"/><path d="M9 2v6M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-9.2 5.1"/>`,
-};
-
 const COPY: Record<Status, { headline: string; detail: string }> = {
   connected: {
-    headline: "Bridge connected",
-    detail: "Your MCP client can drive this browser",
+    headline: "Connected",
+    detail: "MCP client can drive this browser",
   },
   connecting: {
     headline: "Connecting…",
-    detail: "Reaching the local MCP server",
+    detail: "Reaching local MCP server",
   },
   disconnected: {
-    headline: "Server not running",
-    detail: "Start the MCP server to connect",
+    headline: "Offline",
+    detail: "Local MCP server not found",
   },
 };
 
@@ -31,9 +22,6 @@ const el = <T extends HTMLElement>(id: string) =>
 
 function paint(status: Status, url: string, blockHeavy: boolean) {
   document.body.dataset.state = status;
-
-  const icon = el("beacon-icon");
-  if (icon) icon.innerHTML = ICONS[status];
 
   const headline = el("headline");
   if (headline) headline.textContent = COPY[status].headline;
@@ -51,8 +39,8 @@ function paint(status: Status, url: string, blockHeavy: boolean) {
   if (helpText) {
     helpText.innerHTML =
       status === "connected"
-        ? `Try asking your agent: <code>snapshot my current tab</code>`
-        : `Start the server with <code>npx deeporax-browser-mcp</code>, then keep this window open.`;
+        ? `Try: <code>snapshot my current tab</code>`
+        : `Run <code>npx deeporax-browser-mcp</code>, then reopen this popup.`;
   }
 
   const toggle = el<HTMLInputElement>("block-heavy");

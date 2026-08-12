@@ -1285,7 +1285,7 @@ export async function handleDomMethodAsync(
       restoreAfterCapture();
       return { ok: true, overlay: "restored" };
     }
-    showOverlay(String(params.label ?? "is controlling this tab"));
+    showOverlay(String(params.label ?? "controlling this tab"));
     return { ok: true, overlay: "shown" };
   }
 

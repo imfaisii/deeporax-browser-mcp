@@ -1,12 +1,12 @@
 /**
  * Visual "agent is controlling this tab" layer.
  *
- * - Pulsing orange border around the viewport
- * - Status pill with a Stop button
- * - A synthetic cursor that animates to each click target before the click fires
+ * - Hard acid frame around the viewport (print-block, no soft glow)
+ * - Status pill with action text + Stop
+ * - Synthetic cursor that moves to each click target before the click fires
  *
- * Everything lives in a closed shadow root so page CSS cannot fight it, and
- * every node is pointer-events:none except the Stop button.
+ * Closed shadow root so page CSS cannot fight it. pointer-events:none
+ * everywhere except Stop.
  */
 
 const HOST_ID = "__deeporax_agent_overlay__";
@@ -16,14 +16,6 @@ const ACCENT = "#b6e51f";
 const ACCENT_HOVER = "#c9ef4a";
 const INK = "#15170f";
 const PAPER = "#fdfcf7";
-
-/**
- * Brand link in the status pill. Tagged so visits originating from the
- * on-page overlay are attributable, matching the popup's UTM scheme.
- */
-const SITE_URL =
-  "https://deeporax.com/?utm_source=chrome_extension&utm_medium=extension" +
-  "&utm_campaign=browser_mcp&utm_content=overlay_pill";
 
 type OverlayState = {
   host: HTMLElement;
@@ -49,34 +41,25 @@ const CSS = `
   inset: 0;
   pointer-events: none;
   z-index: 2147483647;
-  font: 500 13px/1.3 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 500 12.5px/1.25 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 .frame {
   position: absolute;
   inset: 0;
   border: 2px solid ${ACCENT};
-  border-radius: 4px;
-  box-shadow:
-    inset 0 0 0 1px rgba(182, 229, 31, 0.22),
-    inset 0 0 18px rgba(182, 229, 31, 0.14);
-  animation: pulse 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  box-shadow: inset 0 0 0 1px rgba(21, 23, 15, 0.35);
   opacity: 0;
-  transition: opacity 180ms ease;
+  transition: opacity 160ms ease, border-color 400ms ease;
 }
 .frame.on { opacity: 1; }
-@keyframes pulse {
-  0%, 100% {
-    border-color: rgba(182, 229, 31, 0.9);
-    box-shadow:
-      inset 0 0 0 1px rgba(182, 229, 31, 0.22),
-      inset 0 0 18px rgba(182, 229, 31, 0.12);
+@media (prefers-reduced-motion: no-preference) {
+  .frame.on {
+    animation: edge 2.8s steps(2, end) infinite;
   }
-  50% {
-    border-color: rgba(182, 229, 31, 0.45);
-    box-shadow:
-      inset 0 0 0 1px rgba(182, 229, 31, 0.12),
-      inset 0 0 26px rgba(182, 229, 31, 0.22);
-  }
+}
+@keyframes edge {
+  0%, 100% { border-color: ${ACCENT}; }
+  50% { border-color: rgba(182, 229, 31, 0.55); }
 }
 @media (prefers-reduced-motion: reduce) {
   .frame { animation: none; }
@@ -84,62 +67,44 @@ const CSS = `
 }
 .pill {
   position: absolute;
-  top: 14px;
+  top: 12px;
   left: 50%;
-  transform: translateX(-50%) translateY(-14px);
+  transform: translateX(-50%) translateY(-10px);
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 6px 6px 6px 10px;
+  gap: 8px;
+  padding: 5px 5px 5px 8px;
   border-radius: 999px;
   background: ${INK};
   color: ${PAPER};
-  border: 1px solid rgba(253, 252, 247, 0.14);
+  border: 1px solid ${INK};
   box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.55);
   opacity: 0;
-  transition: opacity 180ms ease, transform 180ms ease;
+  transition: opacity 160ms ease, transform 160ms ease;
   white-space: nowrap;
-  max-width: 78vw;
-}
-.brandlink {
-  pointer-events: auto;
-  cursor: pointer;
-  border: 0;
-  background: none;
-  padding: 0 2px 0 0;
-  margin: 0;
-  font: 650 12.5px/1 ui-sans-serif, system-ui, sans-serif;
-  color: ${ACCENT};
-  letter-spacing: -0.005em;
-  flex: none;
-  text-decoration: none;
-}
-.brandlink:hover { color: ${ACCENT_HOVER}; text-decoration: underline; }
-.divider {
-  width: 1px;
-  height: 13px;
-  background: rgba(253, 252, 247, 0.2);
-  flex: none;
+  max-width: min(420px, 78vw);
 }
 .pill.on { opacity: 1; transform: translateX(-50%) translateY(0); }
 .label {
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 56vw;
+  max-width: 48vw;
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }
-.label b { font-weight: 650; }
-.label span { opacity: 0.72; font-weight: 400; }
+.label span { opacity: 0.78; font-weight: 400; }
 .stop {
   pointer-events: auto;
   cursor: pointer;
-  border: 0;
+  border: 1px solid ${INK};
   border-radius: 999px;
-  padding: 5px 13px;
-  font: 600 12px/1 ui-sans-serif, system-ui, sans-serif;
+  padding: 5px 12px;
+  font: 650 11.5px/1 ui-sans-serif, system-ui, sans-serif;
   color: ${INK};
   background: ${ACCENT};
   flex: none;
-  transition: background 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  letter-spacing: -0.01em;
+  transition: background 120ms ease;
 }
 .stop:hover { background: ${ACCENT_HOVER}; }
 .stop:focus-visible { outline: 2px solid ${PAPER}; outline-offset: 2px; }
@@ -148,44 +113,44 @@ const CSS = `
   position: absolute;
   top: 0;
   left: 0;
-  width: 22px;
-  height: 22px;
-  margin: -2px 0 0 -2px;
+  width: 20px;
+  height: 20px;
+  margin: -1px 0 0 -1px;
   opacity: 0;
-  transition: opacity 150ms ease;
+  transition: opacity 140ms ease;
   will-change: transform;
-  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.45));
+  filter: drop-shadow(1px 1px 0 rgba(0,0,0,0.55));
 }
 .cursor.on { opacity: 1; }
 .ripple {
   position: absolute;
   top: 0;
   left: 0;
-  width: 26px;
-  height: 26px;
-  margin: -13px 0 0 -13px;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
   border-radius: 50%;
   border: 2px solid ${ACCENT};
   opacity: 0;
   will-change: transform, opacity;
   box-sizing: border-box;
 }
-.ripple.go { animation: ring 520ms ease-out 1; }
+.ripple.go { animation: ring 420ms ease-out 1; }
 @keyframes ring {
-  0% { opacity: 0.9; transform: scale(0.35); }
-  100% { opacity: 0; transform: scale(2.2); }
+  0% { opacity: 0.95; transform: scale(0.4); }
+  100% { opacity: 0; transform: scale(1.9); }
 }
 `;
 
 const CURSOR_SVG = `
-<svg viewBox="0 0 24 24" width="22" height="22" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
   <path d="M5 2.5 L5 19.2 L9.1 15.2 L11.7 21.4 L14.6 20.2 L12 14.1 L18 14.1 Z"
         fill="${ACCENT}" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>
 </svg>`;
 
 /** The Deeporax "Stack" mark, same geometry as deeporax.com and the popup. */
 const MARK_SVG = `
-<svg class="mark" width="15" height="15" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+<svg class="mark" width="14" height="14" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <rect x="3" y="3" width="42" height="42" rx="11" fill="${ACCENT}" stroke="${INK}" stroke-width="2.5"/>
   <rect x="19" y="19" width="15" height="15" rx="4" fill="none" stroke="${INK}" stroke-width="2.4"/>
   <rect x="13" y="13" width="17" height="17" rx="4.5" fill="${PAPER}" stroke="${INK}" stroke-width="2.7"/>
@@ -215,33 +180,22 @@ function ensure(): OverlayState {
   const pill = document.createElement("div");
   pill.className = "pill";
 
-  // The Stack mark replaces the generic status dot: it carries the same
-  // "something is live here" signal and identifies who is driving the tab.
   const mark = document.createElement("span");
   mark.innerHTML = MARK_SVG;
   mark.style.cssText = "flex:none;display:flex;";
 
-  const brand = document.createElement("a");
-  brand.className = "brandlink";
-  brand.textContent = "Deeporax";
-  brand.href = SITE_URL;
-  brand.target = "_blank";
-  brand.rel = "noopener noreferrer";
-
-  const divider = document.createElement("div");
-  divider.className = "divider";
-
   const label = document.createElement("div");
   label.className = "label";
-  label.innerHTML = "<span>is controlling this tab</span>";
+  label.innerHTML = "<span>controlling this tab</span>";
 
   const stopBtn = document.createElement("button");
   stopBtn.className = "stop";
+  stopBtn.type = "button";
   stopBtn.textContent = "Stop";
   stopBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     stopped = true;
-    setLabel("stopped by user");
+    setLabel("stopped");
     window.dispatchEvent(new CustomEvent("__deeporax_agent_stop"));
     setTimeout(() => hide(), 900);
   });
@@ -253,7 +207,7 @@ function ensure(): OverlayState {
   const ripple = document.createElement("div");
   ripple.className = "ripple";
 
-  pill.append(mark, brand, divider, label, stopBtn);
+  pill.append(mark, label, stopBtn);
   wrap.append(frame, pill, ripple, cursor);
   root.append(style, wrap);
   (document.body || document.documentElement).appendChild(host);
@@ -264,7 +218,6 @@ function ensure(): OverlayState {
 
 function setLabel(action: string): void {
   const s = ensure();
-  // Only the action text changes; the brand link is a sibling node so it survives.
   s.label.innerHTML = `<span>${escapeHtml(action)}</span>`;
 }
 
@@ -277,7 +230,7 @@ function escapeHtml(v: string): string {
 }
 
 /** Show the overlay and describe what the agent is doing right now. */
-export function showOverlay(action = "is controlling this tab"): void {
+export function showOverlay(action = "controlling this tab"): void {
   if (stopped) return;
   const s = ensure();
   s.frame.classList.add("on");
