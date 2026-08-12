@@ -1,6 +1,6 @@
 {
   "name": "deeporax-browser-mcp",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "description": "Deeporax Browser MCP: MCP server + Chrome extension bridge for real browser control (DOM snapshots, screenshots, clicks, console, network).",
   "type": "module",
   "license": "MIT",
