@@ -1,8 +1,8 @@
 /**
  * Visual "agent is controlling this tab" layer.
  *
- * - Hard acid frame around the viewport (print-block, no soft glow)
- * - Ticket-style status strip with action text + Stop
+ * - Hard acid frame (print edge, no glow stack)
+ * - Compact status bar: mark + action + Stop
  * - Synthetic cursor that moves to each click target before the click fires
  *
  * Closed shadow root so page CSS cannot fight it. pointer-events:none
@@ -11,7 +11,7 @@
 
 const HOST_ID = "__deeporax_agent_overlay__";
 
-/** Brand tokens mirrored from deeporax.com: acid accent on greenish ink. */
+/** Brand tokens mirrored from deeporax.com. */
 const ACCENT = "#b6e51f";
 const ACCENT_HOVER = "#c9ef4a";
 const INK = "#15170f";
@@ -21,7 +21,7 @@ type OverlayState = {
   host: HTMLElement;
   root: ShadowRoot;
   frame: HTMLElement;
-  pill: HTMLElement;
+  bar: HTMLElement;
   label: HTMLElement;
   cursor: HTMLElement;
   ripple: HTMLElement;
@@ -41,96 +41,74 @@ const CSS = `
   inset: 0;
   pointer-events: none;
   z-index: 2147483647;
-  font: 500 12.5px/1.25 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 600 13px/1.2 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: ${INK};
 }
 .frame {
   position: absolute;
   inset: 0;
-  border: 2.5px solid ${ACCENT};
-  box-shadow:
-    inset 0 0 0 1px rgba(21, 23, 15, 0.45),
-    inset 0 0 0 4px rgba(182, 229, 31, 0.12);
+  border: 2px solid ${ACCENT};
+  box-shadow: inset 0 0 0 1px rgba(21, 23, 15, 0.4);
   opacity: 0;
-  transition: opacity 160ms ease, border-color 400ms ease;
+  transition: opacity 140ms ease;
 }
 .frame.on { opacity: 1; }
-@media (prefers-reduced-motion: no-preference) {
-  .frame.on {
-    animation: edge 2.6s steps(2, end) infinite;
-  }
-}
-@keyframes edge {
-  0%, 100% { border-color: ${ACCENT}; }
-  50% { border-color: rgba(182, 229, 31, 0.5); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .frame { animation: none; }
-  .ripple.go { animation: none; opacity: 0; }
-}
-.pill {
+.bar {
   position: absolute;
   top: 12px;
   left: 50%;
-  transform: translateX(-50%) translateY(-10px);
+  transform: translateX(-50%) translateY(-8px);
   display: flex;
   align-items: center;
-  gap: 0;
-  padding: 0;
-  border-radius: 9px;
+  gap: 8px;
+  max-width: min(420px, 86vw);
+  padding: 5px 5px 5px 8px;
   background: ${PAPER};
-  color: ${INK};
-  border: 2px solid ${INK};
-  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.72);
+  border: 1.5px solid ${INK};
+  border-radius: 999px;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.55);
   opacity: 0;
-  transition: opacity 160ms ease, transform 160ms ease;
-  white-space: nowrap;
-  max-width: min(440px, 84vw);
-  overflow: hidden;
+  transition: opacity 140ms ease, transform 140ms ease;
 }
-.pill.on { opacity: 1; transform: translateX(-50%) translateY(0); }
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 9px 6px 8px;
-  background: ${INK};
-  color: ${PAPER};
-  border-right: 2px solid ${INK};
-  flex: none;
+.bar.on {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
-.brand-tag {
-  font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  opacity: 0.88;
-}
+.mark { flex: none; display: block; }
 .label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 42vw;
-  padding: 0 10px;
+  white-space: nowrap;
+  max-width: 46vw;
   font-weight: 600;
   letter-spacing: -0.015em;
   color: ${INK};
 }
-.label span { opacity: 0.72; font-weight: 500; }
+.label em {
+  font-style: normal;
+  font-weight: 500;
+  color: #3a3e2c;
+}
 .stop {
   pointer-events: auto;
-  cursor: pointer;
-  border: 0;
-  border-left: 2px solid ${INK};
-  border-radius: 0;
-  padding: 8px 13px;
-  font: 750 11.5px/1 ui-sans-serif, system-ui, sans-serif;
-  color: ${INK};
-  background: ${ACCENT};
   flex: none;
+  height: 28px;
+  padding: 0 12px;
+  border: 1.5px solid ${INK};
+  border-radius: 999px;
+  background: ${ACCENT};
+  color: #2b3505;
+  font: 700 12px/1 ui-sans-serif, system-ui, sans-serif;
   letter-spacing: -0.01em;
-  transition: background 120ms ease;
+  cursor: pointer;
 }
 .stop:hover { background: ${ACCENT_HOVER}; }
-.stop:focus-visible { outline: 2px solid ${PAPER}; outline-offset: -3px; }
-.mark { flex: none; display: block; }
+.stop:focus-visible {
+  outline: 2px solid ${PAPER};
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px ${INK};
+}
 .cursor {
   position: absolute;
   top: 0;
@@ -139,7 +117,7 @@ const CSS = `
   height: 20px;
   margin: -1px 0 0 -1px;
   opacity: 0;
-  transition: opacity 140ms ease;
+  transition: opacity 120ms ease;
   will-change: transform;
   filter: drop-shadow(1px 1px 0 rgba(0,0,0,0.55));
 }
@@ -157,22 +135,25 @@ const CSS = `
   will-change: transform, opacity;
   box-sizing: border-box;
 }
-.ripple.go { animation: ring 420ms ease-out 1; }
+.ripple.go { animation: ring 400ms ease-out 1; }
 @keyframes ring {
   0% { opacity: 0.95; transform: scale(0.4); }
-  100% { opacity: 0; transform: scale(1.9); }
+  100% { opacity: 0; transform: scale(1.85); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar, .frame, .cursor { transition: none; }
+  .ripple.go { animation: none; opacity: 0; }
 }
 `;
 
 const CURSOR_SVG = `
-<svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 24 24" width="20" height="20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <path d="M5 2.5 L5 19.2 L9.1 15.2 L11.7 21.4 L14.6 20.2 L12 14.1 L18 14.1 Z"
         fill="${ACCENT}" stroke="${INK}" stroke-width="1.6" stroke-linejoin="round"/>
 </svg>`;
 
-/** The Deeporax "Stack" mark, same geometry as deeporax.com and the popup. */
 const MARK_SVG = `
-<svg class="mark" width="13" height="13" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+<svg class="mark" width="14" height="14" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
   <rect x="3" y="3" width="42" height="42" rx="11" fill="${ACCENT}" stroke="${INK}" stroke-width="2.5"/>
   <rect x="19" y="19" width="15" height="15" rx="4" fill="none" stroke="${INK}" stroke-width="2.4"/>
   <rect x="13" y="13" width="17" height="17" rx="4.5" fill="${PAPER}" stroke="${INK}" stroke-width="2.7"/>
@@ -184,7 +165,7 @@ function ensure(): OverlayState {
 
   const host = document.createElement("div");
   host.id = HOST_ID;
-  host.setAttribute("aria-hidden", "true");
+  // Do not aria-hide the host: Stop must stay in the accessibility tree.
   host.style.cssText =
     "position:fixed;inset:0;pointer-events:none;z-index:2147483647;";
 
@@ -198,22 +179,28 @@ function ensure(): OverlayState {
 
   const frame = document.createElement("div");
   frame.className = "frame";
+  frame.setAttribute("aria-hidden", "true");
 
-  const pill = document.createElement("div");
-  pill.className = "pill";
+  const bar = document.createElement("div");
+  bar.className = "bar";
+  bar.setAttribute("role", "status");
 
-  const brand = document.createElement("div");
-  brand.className = "brand";
-  brand.innerHTML = `${MARK_SVG}<span class="brand-tag">Agent</span>`;
+  const mark = document.createElement("span");
+  mark.innerHTML = MARK_SVG;
+  mark.setAttribute("aria-hidden", "true");
+  mark.style.cssText = "flex:none;display:flex;";
 
   const label = document.createElement("div");
   label.className = "label";
-  label.innerHTML = "<span>controlling this tab</span>";
+  label.id = "__deeporax_agent_label";
+  label.innerHTML = "<em>controlling this tab</em>";
 
   const stopBtn = document.createElement("button");
   stopBtn.className = "stop";
   stopBtn.type = "button";
   stopBtn.textContent = "Stop";
+  stopBtn.setAttribute("aria-label", "Stop browser agent");
+  stopBtn.setAttribute("aria-describedby", "__deeporax_agent_label");
   stopBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     stopped = true;
@@ -224,23 +211,25 @@ function ensure(): OverlayState {
 
   const cursor = document.createElement("div");
   cursor.className = "cursor";
+  cursor.setAttribute("aria-hidden", "true");
   cursor.innerHTML = CURSOR_SVG;
 
   const ripple = document.createElement("div");
   ripple.className = "ripple";
+  ripple.setAttribute("aria-hidden", "true");
 
-  pill.append(brand, label, stopBtn);
-  wrap.append(frame, pill, ripple, cursor);
+  bar.append(mark, label, stopBtn);
+  wrap.append(frame, bar, ripple, cursor);
   root.append(style, wrap);
   (document.body || document.documentElement).appendChild(host);
 
-  state = { host, root, frame, pill, label, cursor, ripple, stopBtn };
+  state = { host, root, frame, bar, label, cursor, ripple, stopBtn };
   return state;
 }
 
 function setLabel(action: string): void {
   const s = ensure();
-  s.label.innerHTML = `<span>${escapeHtml(action)}</span>`;
+  s.label.innerHTML = `<em>${escapeHtml(action)}</em>`;
 }
 
 function escapeHtml(v: string): string {
@@ -256,7 +245,7 @@ export function showOverlay(action = "controlling this tab"): void {
   if (stopped) return;
   const s = ensure();
   s.frame.classList.add("on");
-  s.pill.classList.add("on");
+  s.bar.classList.add("on");
   setLabel(action);
 
   if (idleTimer) clearTimeout(idleTimer);
@@ -266,7 +255,7 @@ export function showOverlay(action = "controlling this tab"): void {
 export function hide(): void {
   if (!state) return;
   state.frame.classList.remove("on");
-  state.pill.classList.remove("on");
+  state.bar.classList.remove("on");
   state.cursor.classList.remove("on");
 }
 
@@ -277,13 +266,13 @@ export function hide(): void {
  * agent can end up clicking our own Stop button. Visibility is stashed so the
  * page looks the same afterwards.
  */
-let hiddenForCapture: { frame: boolean; pill: boolean } | null = null;
+let hiddenForCapture: { frame: boolean; bar: boolean } | null = null;
 
 export function hideForCapture(): void {
   if (!state || hiddenForCapture) return;
   hiddenForCapture = {
     frame: state.frame.classList.contains("on"),
-    pill: state.pill.classList.contains("on"),
+    bar: state.bar.classList.contains("on"),
   };
   state.host.style.display = "none";
 }
@@ -319,7 +308,11 @@ function prefersReducedMotion(): boolean {
  * Glide the synthetic cursor to (x, y) in viewport CSS pixels.
  * Resolves when the cursor has arrived so the caller can click right after.
  */
-export function moveCursorTo(x: number, y: number, action?: string): Promise<void> {
+export function moveCursorTo(
+  x: number,
+  y: number,
+  action?: string
+): Promise<void> {
   const s = ensure();
   if (action) showOverlay(action);
   else showOverlay();
@@ -364,7 +357,6 @@ export function clickPulse(x = cursorX, y = cursorY): void {
   const s = ensure();
   s.ripple.style.transform = `translate(${x}px, ${y}px)`;
   s.ripple.classList.remove("go");
-  // force reflow so the animation restarts
   void s.ripple.offsetWidth;
   s.ripple.classList.add("go");
 }
@@ -385,7 +377,7 @@ export async function cursorToElement(
   return { x, y };
 }
 
-/** Short description used in the pill, e.g. `clicked "Sign in"`. */
+/** Short description used in the bar, e.g. `clicked "Sign in"`. */
 export function describe(el: Element): string {
   const tag = el.tagName.toLowerCase();
   const text =

@@ -4,22 +4,25 @@ type Status = "connected" | "connecting" | "disconnected";
 
 const COPY: Record<
   Status,
-  { headline: string; detail: string; chip: string }
+  { kicker: string; title: string; detail: string; hint: string }
 > = {
   connected: {
-    headline: "Live",
-    detail: "MCP client can drive this browser",
-    chip: "On",
+    kicker: "Bridge · on",
+    title: "Connected",
+    detail: "MCP client can drive this browser.",
+    hint: 'In your agent, try: <code>snapshot my current tab</code>',
   },
   connecting: {
-    headline: "Connecting",
-    detail: "Reaching local MCP server",
-    chip: "…",
+    kicker: "Bridge · linking",
+    title: "Connecting",
+    detail: "Reaching the local MCP server…",
+    hint: "Keep this panel open for a moment.",
   },
   disconnected: {
-    headline: "Offline",
-    detail: "Local MCP server not found",
-    chip: "Off",
+    kicker: "Bridge · off",
+    title: "Not connected",
+    detail: "No local MCP server on this machine.",
+    hint: "Run <code>npx deeporax-browser-mcp</code>, then open this panel again.",
   },
 };
 
@@ -29,27 +32,33 @@ const el = <T extends HTMLElement>(id: string) =>
 function paint(status: Status, url: string, blockHeavy: boolean) {
   document.body.dataset.state = status;
 
-  const headline = el("headline");
-  if (headline) headline.textContent = COPY[status].headline;
+  const kicker = el("status-kicker");
+  if (kicker) kicker.textContent = COPY[status].kicker;
 
-  const chipText = el("chip-text");
-  if (chipText) chipText.textContent = COPY[status].chip;
+  const title = el("status-title");
+  if (title) title.textContent = COPY[status].title;
 
-  const detail = el("detail");
+  const detail = el("status-detail");
   if (detail) {
     if (status === "connected") {
-      detail.innerHTML = `<span class="endpoint">${url}</span>`;
+      detail.innerHTML = `<span class="endpoint">${escapeHtml(url)}</span>`;
     } else {
       detail.textContent = COPY[status].detail;
     }
   }
 
-  const helpText = el("help-text");
-  if (helpText) {
-    helpText.innerHTML =
-      status === "connected"
-        ? `Try: <code>snapshot my current tab</code>`
-        : `Run <code>npx deeporax-browser-mcp</code>, then reopen this popup.`;
+  const hint = el("hint");
+  if (hint) hint.innerHTML = COPY[status].hint;
+
+  const reconnect = el<HTMLButtonElement>("reconnect");
+  if (reconnect) {
+    reconnect.disabled = status === "connecting";
+    reconnect.textContent =
+      status === "connecting"
+        ? "Connecting…"
+        : status === "connected"
+          ? "Reconnect"
+          : "Reconnect";
   }
 
   const toggle = el<HTMLInputElement>("block-heavy");
@@ -57,6 +66,14 @@ function paint(status: Status, url: string, blockHeavy: boolean) {
     toggle.checked = blockHeavy;
     toggle.setAttribute("aria-checked", blockHeavy ? "true" : "false");
   }
+}
+
+function escapeHtml(v: string): string {
+  return v
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 async function refresh() {
@@ -73,9 +90,13 @@ async function refresh() {
 }
 
 el("reconnect")?.addEventListener("click", async () => {
-  paint("connecting", "", el<HTMLInputElement>("block-heavy")?.checked ?? false);
-  await chrome.runtime.sendMessage({ type: "reconnect" });
-  setTimeout(() => void refresh(), 400);
+  const heavy = el<HTMLInputElement>("block-heavy")?.checked ?? false;
+  paint("connecting", "", heavy);
+  try {
+    await chrome.runtime.sendMessage({ type: "reconnect" });
+  } finally {
+    setTimeout(() => void refresh(), 400);
+  }
 });
 
 el("brand")?.addEventListener("click", () => openSite("/", "popup_wordmark"));

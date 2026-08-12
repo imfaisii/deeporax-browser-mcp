@@ -6,75 +6,54 @@
     <title>Deeporax Browser MCP</title>
     <style>
       /*
-        Print-block instrument panel.
-        Tokens mirror deeporax.com: greenish ink on warm bone paper, one acid
-        accent, hard offset shadows (no blur). System fonts only — CSP blocks
-        remote faces, and webfonts are not worth the weight in a 312px panel.
+        Field-report panel, not a card stack.
+        Tokens from deeporax.com. System fonts only (extension CSP).
+        Contrast target: body text ≥ 4.5:1, UI chrome ≥ 3:1.
       */
       :root {
         color-scheme: light dark;
 
-        --ink-900: #15170f;
-        --ink-600: #565b43;
-        --ink-500: #71765c;
-        --ink-400: #94987e;
-        --paper-0: #fdfcf7;
-        --paper-1: #f6f4ea;
+        --ink: #15170f;
+        --ink-2: #3a3e2c;
+        --ink-3: #565b43;
+        --paper: #fdfcf7;
+        --paper-bg: #f6f4ea;
         --paper-2: #efecdd;
-        --paper-3: #e7e3d0;
-
-        --acid-500: #b6e51f;
-        --acid-400: #c9ef4a;
+        --acid: #b6e51f;
+        --acid-hover: #c9ef4a;
         --acid-ink: #2b3505;
-        --acid-wash: #eef8cd;
-
-        --amber-600: #b06c00;
-        --amber-wash: #f3e4c2;
-
-        --bg-app: var(--paper-1);
-        --surface-card: var(--paper-0);
-        --surface-inset: var(--paper-2);
-        --text-body: var(--ink-900);
-        --text-secondary: var(--ink-600);
-        --text-faint: var(--ink-400);
-        --text-on-acid: var(--acid-ink);
-        --border-hairline: rgba(21, 23, 15, 0.14);
-        --border-strong: var(--ink-900);
-        --status-warn: var(--amber-600);
-        --status-off: var(--ink-500);
-
-        --fx-block: 2px 2px 0 rgba(21, 23, 15, 0.92);
-        --fx-block-sm: 1.5px 1.5px 0 rgba(21, 23, 15, 0.92);
-
-        --radius-control: 7px;
-        --radius-card: 10px;
-        --radius-pill: 999px;
-
-        --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-        --dur-fast: 120ms;
-        --dur-med: 200ms;
-
-        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --live: #3f7d3a;
+        --live-bg: #e0efdb;
+        --warn: #8a5500;
+        --warn-bg: #f6e9cc;
+        --off: #565b43;
+        --off-bg: #e9eadf;
+        --line: rgba(21, 23, 15, 0.16);
+        --focus: 0 0 0 2px var(--paper), 0 0 0 4px var(--ink);
+        --block: 2px 2px 0 rgba(21, 23, 15, 0.9);
         --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
           sans-serif;
+        --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        --ease: cubic-bezier(0.22, 1, 0.36, 1);
       }
 
       @media (prefers-color-scheme: dark) {
         :root {
-          --ink-900: #f2f1e4;
-          --ink-600: #9fa287;
-          --ink-500: #8f937a;
-          --ink-400: #7f836a;
-          --paper-0: #191c10;
-          --paper-1: #121408;
+          --ink: #f2f1e4;
+          --ink-2: #c3c4ac;
+          --ink-3: #9fa287;
+          --paper: #191c10;
+          --paper-bg: #121408;
           --paper-2: #212416;
-          --paper-3: #2a2d1c;
-          --acid-wash: #2e3a0b;
-          --amber-600: #e3a83f;
-          --amber-wash: #382c12;
-          --border-hairline: rgba(242, 241, 228, 0.14);
-          --fx-block: 2px 2px 0 rgba(0, 0, 0, 0.94);
-          --fx-block-sm: 1.5px 1.5px 0 rgba(0, 0, 0, 0.94);
+          --live: #84cd74;
+          --live-bg: #20301b;
+          --warn: #e3a83f;
+          --warn-bg: #382c12;
+          --off: #9fa287;
+          --off-bg: #282b19;
+          --line: rgba(242, 241, 228, 0.16);
+          --focus: 0 0 0 2px var(--paper-bg), 0 0 0 4px var(--acid);
+          --block: 2px 2px 0 rgba(0, 0, 0, 0.92);
         }
       }
 
@@ -83,401 +62,325 @@
       }
 
       body {
-        width: 312px;
+        width: 300px;
         margin: 0;
-        padding: 0;
-        background:
-          radial-gradient(
-            circle at 1px 1px,
-            rgba(21, 23, 15, 0.045) 1px,
-            transparent 0
-          )
-          0 0 / 7px 7px,
-          var(--bg-app);
-        color: var(--text-body);
-        font: 400 12.5px/1.4 var(--sans);
+        background: var(--paper-bg);
+        color: var(--ink);
+        font: 400 13px/1.45 var(--sans);
         -webkit-font-smoothing: antialiased;
       }
 
-      @media (prefers-color-scheme: dark) {
-        body {
-          background:
-            radial-gradient(
-              circle at 1px 1px,
-              rgba(242, 241, 228, 0.04) 1px,
-              transparent 0
-            )
-            0 0 / 7px 7px,
-            var(--bg-app);
-        }
-      }
-
-      /* ---------- masthead ---------- */
-
-      header {
+      /* ---- identity strip ---- */
+      .id {
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 11px 12px 10px;
-        border-bottom: 2px solid var(--border-strong);
-        background: var(--surface-card);
+        padding: 10px 12px;
+        background: var(--paper);
+        border-bottom: 1px solid var(--line);
       }
 
-      .lockup {
+      .id-btn {
         display: inline-flex;
         align-items: center;
         gap: 7px;
-        background: none;
-        border: 0;
-        padding: 2px 4px;
-        margin: -2px -4px;
-        border-radius: var(--radius-control);
-        font: inherit;
-        color: inherit;
-        cursor: pointer;
         min-width: 0;
+        margin: 0;
+        padding: 2px;
+        border: 0;
+        border-radius: 6px;
+        background: none;
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
       }
-      .lockup:focus-visible {
-        outline: 2px solid var(--border-strong);
-        outline-offset: 1px;
+      .id-btn:focus-visible {
+        box-shadow: var(--focus);
+        outline: none;
       }
-      .lockup svg {
+      .id-btn svg {
         display: block;
         flex: none;
       }
 
-      .word {
-        font-size: 13.5px;
+      .id-name {
+        font-size: 13px;
         font-weight: 700;
         letter-spacing: -0.03em;
-        white-space: nowrap;
       }
 
-      .badge {
-        display: inline-flex;
-        align-items: center;
+      .id-product {
         margin-left: auto;
-        padding: 3px 6px 2px;
-        border: 1.5px solid var(--border-strong);
-        border-radius: 5px;
-        background: var(--acid-500);
-        color: var(--text-on-acid);
+        color: var(--ink-3);
         font-family: var(--mono);
-        font-size: 9px;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+
+      /* ---- status is the panel, not a nested card ---- */
+      .status {
+        padding: 14px 12px 12px;
+        border-bottom: 1px solid var(--line);
+        background: var(--off-bg);
+      }
+      [data-state="connected"] .status {
+        background: var(--live-bg);
+      }
+      [data-state="connecting"] .status {
+        background: var(--warn-bg);
+      }
+
+      .status-kicker {
+        margin: 0 0 4px;
+        font-family: var(--mono);
+        font-size: 10px;
         font-weight: 700;
         letter-spacing: 0.08em;
         text-transform: uppercase;
-        line-height: 1.2;
-        box-shadow: var(--fx-block-sm);
-        white-space: nowrap;
+        color: var(--ink-3);
+      }
+      [data-state="connected"] .status-kicker {
+        color: var(--live);
+      }
+      [data-state="connecting"] .status-kicker {
+        color: var(--warn);
       }
 
-      /* ---------- main ---------- */
-
-      main {
-        padding: 12px;
-        display: grid;
-        gap: 10px;
-      }
-
-      /* Status ticket — one hard print card. The whole job of the popup. */
-      .status {
-        position: relative;
-        display: grid;
-        gap: 8px;
-        padding: 11px 12px 12px;
-        background: var(--surface-card);
-        border: 2px solid var(--border-strong);
-        border-radius: var(--radius-card);
-        box-shadow: var(--fx-block);
-      }
-
-      .status-top {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-      }
-
-      .meta {
-        font-family: var(--mono);
-        font-size: 9.5px;
-        font-weight: 700;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-        color: var(--text-faint);
-      }
-
-      .chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        padding: 3px 7px 3px 6px;
-        border: 1.5px solid var(--border-strong);
-        border-radius: var(--radius-pill);
-        background: var(--surface-inset);
-        font-family: var(--mono);
-        font-size: 9.5px;
-        font-weight: 700;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        color: var(--text-secondary);
-        line-height: 1.2;
-      }
-      .chip-dot {
-        width: 7px;
-        height: 7px;
-        border-radius: 50%;
-        border: 1.25px solid var(--border-strong);
-        background: var(--status-off);
-        flex: none;
-      }
-
-      [data-state="connected"] .chip {
-        background: var(--acid-wash);
-        color: var(--text-on-acid);
-      }
-      [data-state="connected"] .chip-dot {
-        background: var(--acid-500);
-      }
-      [data-state="connecting"] .chip {
-        background: var(--amber-wash);
-        color: var(--status-warn);
-      }
-      [data-state="connecting"] .chip-dot {
-        background: var(--status-warn);
-      }
-
-      .headline {
+      .status-title {
         margin: 0;
-        font-size: 18px;
+        font-size: 20px;
         font-weight: 750;
-        letter-spacing: -0.035em;
-        line-height: 1.15;
+        letter-spacing: -0.04em;
+        line-height: 1.1;
+        color: var(--ink);
       }
 
-      .detail {
-        margin: 0;
-        font-size: 11.5px;
-        color: var(--text-secondary);
-        line-height: 1.35;
+      .status-detail {
+        margin: 6px 0 0;
+        font-size: 12.5px;
+        line-height: 1.4;
+        color: var(--ink-2);
       }
 
       .endpoint {
-        display: inline-block;
         font-family: var(--mono);
-        font-size: 11px;
+        font-size: 11.5px;
         font-weight: 600;
         font-variant-numeric: tabular-nums;
         letter-spacing: -0.01em;
-        color: var(--text-body);
-        background: var(--surface-inset);
-        border: 1px solid var(--border-hairline);
-        border-radius: 4px;
-        padding: 2px 6px;
-        max-width: 100%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        vertical-align: bottom;
+        color: var(--ink);
+        word-break: break-all;
       }
 
-      /* ---------- preference ---------- */
+      .hint {
+        margin: 10px 0 0;
+        font-size: 12px;
+        line-height: 1.4;
+        color: var(--ink-2);
+      }
+      .hint code {
+        font-family: var(--mono);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--ink);
+      }
 
-      .pref {
+      /* ---- controls ---- */
+      .controls {
+        display: grid;
+        gap: 0;
+        padding: 0;
+        background: var(--paper);
+      }
+
+      .row {
         display: flex;
         align-items: center;
-        gap: 10px;
-        padding: 9px 10px;
-        background: var(--surface-card);
-        border: 1.5px solid var(--border-strong);
-        border-radius: var(--radius-control);
-        box-shadow: var(--fx-block-sm);
+        gap: 12px;
+        width: 100%;
+        margin: 0;
+        padding: 12px;
+        border: 0;
+        border-bottom: 1px solid var(--line);
+        background: transparent;
+        text-align: left;
         cursor: pointer;
-        user-select: none;
       }
-      .pref:focus-within {
-        outline: 2px solid var(--border-strong);
-        outline-offset: 1px;
-      }
-      .pref-copy {
-        min-width: 0;
-        flex: 1;
-      }
-      .pref-title {
-        display: block;
-        font-size: 12px;
-        font-weight: 650;
-        letter-spacing: -0.015em;
-      }
-      .pref-hint {
-        display: block;
-        margin-top: 2px;
-        font-size: 10.5px;
-        color: var(--text-secondary);
-        line-height: 1.35;
+      .row:focus-within {
+        background: var(--paper-2);
       }
 
+      .row-copy {
+        flex: 1;
+        min-width: 0;
+      }
+      .row-title {
+        display: block;
+        font-size: 13px;
+        font-weight: 650;
+        letter-spacing: -0.015em;
+        color: var(--ink);
+      }
+      .row-hint {
+        display: block;
+        margin-top: 2px;
+        font-size: 11.5px;
+        line-height: 1.35;
+        color: var(--ink-3);
+      }
+
+      /* Brand toggle: ink thumb on paper / acid track */
       .switch {
         position: relative;
         flex: none;
-        width: 36px;
-        height: 20px;
+        width: 38px;
+        height: 22px;
       }
       .switch input {
         position: absolute;
         inset: 0;
-        opacity: 0;
+        z-index: 1;
         margin: 0;
+        opacity: 0;
         cursor: pointer;
       }
-      .switch-track {
+      .switch-ui {
         display: block;
         width: 100%;
         height: 100%;
-        border-radius: 5px;
-        background: var(--surface-inset);
-        border: 1.5px solid var(--border-strong);
-        transition: background var(--dur-fast) var(--ease-out);
+        border: 1.5px solid var(--ink);
+        border-radius: 999px;
+        background: var(--paper-2);
+        transition: background 120ms var(--ease);
         pointer-events: none;
       }
-      .switch-track::after {
+      .switch-ui::after {
         content: "";
         position: absolute;
-        top: 2px;
-        left: 2px;
+        top: 3px;
+        left: 3px;
         width: 14px;
         height: 14px;
-        border-radius: 3px;
-        background: var(--surface-card);
-        border: 1.5px solid var(--border-strong);
-        transition: transform var(--dur-fast) var(--ease-out);
+        border-radius: 50%;
+        background: var(--ink);
+        transition: transform 120ms var(--ease);
       }
-      .switch input:checked + .switch-track {
-        background: var(--acid-500);
+      .switch input:checked + .switch-ui {
+        background: var(--acid);
       }
-      .switch input:checked + .switch-track::after {
+      .switch input:checked + .switch-ui::after {
         transform: translateX(16px);
-        background: var(--paper-0);
       }
-      .switch input:focus-visible + .switch-track {
-        outline: 2px solid var(--border-strong);
-        outline-offset: 2px;
+      .switch input:focus-visible + .switch-ui {
+        box-shadow: var(--focus);
       }
-
-      /* ---------- actions ---------- */
+      .switch input:disabled + .switch-ui {
+        opacity: 0.45;
+      }
 
       .actions {
         display: grid;
-        grid-template-columns: 1.35fr 1fr;
-        gap: 7px;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        padding: 12px;
+        border-bottom: 1px solid var(--line);
       }
 
-      button.act {
-        border-radius: var(--radius-control);
-        padding: 9px 10px;
-        font: 700 12px/1 var(--sans);
-        letter-spacing: -0.01em;
+      .btn {
+        height: 36px;
+        padding: 0 12px;
+        border: 1.5px solid var(--ink);
+        border-radius: 7px;
+        font: 650 13px/1 var(--sans);
+        letter-spacing: -0.015em;
         cursor: pointer;
-        border: 1.5px solid var(--border-strong);
         transition:
-          transform var(--dur-fast) var(--ease-out),
-          box-shadow var(--dur-fast) var(--ease-out),
-          background var(--dur-fast) var(--ease-out);
+          transform 120ms var(--ease),
+          box-shadow 120ms var(--ease),
+          background 120ms var(--ease);
       }
-      button.act:active {
-        transform: translate(1.5px, 1.5px);
+      .btn:focus-visible {
+        box-shadow: var(--focus);
+        outline: none;
+      }
+      .btn:active:not(:disabled) {
+        transform: translate(2px, 2px);
         box-shadow: none;
       }
-      button.act:focus-visible {
-        outline: 2px solid var(--border-strong);
-        outline-offset: 2px;
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
       }
 
-      .primary {
-        background: var(--acid-500);
-        color: var(--text-on-acid);
-        box-shadow: var(--fx-block-sm);
+      .btn-primary {
+        background: var(--acid);
+        color: var(--acid-ink);
+        box-shadow: var(--block);
       }
-      .primary:hover {
-        background: var(--acid-400);
-      }
-
-      .ghost {
-        background: var(--surface-card);
-        color: var(--text-body);
-        box-shadow: var(--fx-block-sm);
-      }
-      .ghost:hover {
-        background: var(--surface-inset);
+      .btn-primary:hover:not(:disabled) {
+        background: var(--acid-hover);
       }
 
-      /* ---------- help strip ---------- */
-
-      .help {
-        margin: 0;
-        padding: 8px 10px;
-        border-radius: var(--radius-control);
-        background: var(--surface-inset);
-        border: 1.5px dashed var(--border-hairline);
-        font-size: 11px;
-        color: var(--text-secondary);
+      .btn-secondary {
+        background: var(--paper);
+        color: var(--ink);
+        box-shadow: var(--block);
       }
-      .help p {
-        margin: 0;
-      }
-      .help code {
-        font-family: var(--mono);
-        font-size: 10px;
-        font-weight: 600;
-        padding: 1px 4px;
-        border-radius: 3px;
-        background: var(--surface-card);
-        border: 1px solid var(--border-hairline);
-        color: var(--text-body);
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--paper-2);
       }
 
-      /* ---------- footer ---------- */
+      /* Offline: reconnect owns the row */
+      [data-state="disconnected"] .actions,
+      [data-state="connecting"] .actions {
+        grid-template-columns: 1.4fr 1fr;
+      }
 
-      footer {
+      /* ---- footer ---- */
+      .foot {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
-        padding: 8px 12px 10px;
-        border-top: 1.5px solid var(--border-hairline);
-        background: var(--surface-card);
+        padding: 9px 12px 10px;
+        background: var(--paper-bg);
       }
 
-      .link {
-        background: none;
+      .foot-link {
+        margin: 0;
+        padding: 4px 2px;
         border: 0;
-        padding: 2px 4px;
-        margin: -2px -4px;
-        border-radius: var(--radius-control);
-        font: 600 11px/1 var(--sans);
-        color: var(--text-faint);
+        border-radius: 4px;
+        background: none;
+        color: var(--ink-2);
+        font: 600 12px/1 var(--sans);
         cursor: pointer;
+        text-decoration: underline;
+        text-decoration-color: transparent;
+        text-underline-offset: 2px;
       }
-      .link:hover {
-        color: var(--text-body);
+      .foot-link:hover {
+        color: var(--ink);
+        text-decoration-color: currentColor;
       }
-      .link:focus-visible {
-        outline: 2px solid var(--border-strong);
-        outline-offset: 1px;
+      .foot-link:focus-visible {
+        box-shadow: var(--focus);
+        outline: none;
       }
 
-      .version {
+      .ver {
         font-family: var(--mono);
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 600;
-        color: var(--text-faint);
+        color: var(--ink-3);
         font-variant-numeric: tabular-nums;
-        letter-spacing: 0.02em;
       }
 
       @media (prefers-reduced-motion: reduce) {
         *,
+        *::before,
         *::after {
           animation: none !important;
           transition: none !important;
@@ -486,8 +389,14 @@
     </style>
   </head>
   <body data-state="disconnected">
-    <header>
-      <button class="lockup" id="brand" type="button" title="Open deeporax.com">
+    <header class="id">
+      <button
+        class="id-btn"
+        id="brand"
+        type="button"
+        title="Open deeporax.com"
+        aria-label="Deeporax, open website"
+      >
         <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
           <rect
             x="3"
@@ -521,30 +430,42 @@
           />
           <polygon points="18.6,17 18.6,26 26,21.5" fill="#15170f" />
         </svg>
-        <span class="word">Deeporax</span>
+        <span class="id-name">Deeporax</span>
       </button>
-      <span class="badge">MCP</span>
+      <span class="id-product">Browser MCP</span>
     </header>
 
-    <main>
-      <section class="status" aria-live="polite">
-        <div class="status-top">
-          <span class="meta">Bridge</span>
-          <span class="chip" id="chip">
-            <span class="chip-dot" aria-hidden="true"></span>
-            <span id="chip-text">Offline</span>
-          </span>
-        </div>
-        <h1 class="headline" id="headline">Checking…</h1>
-        <p class="detail" id="detail">Looking for local server</p>
-      </section>
+    <section
+      class="status"
+      aria-labelledby="status-title"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <p class="status-kicker" id="status-kicker">Bridge</p>
+      <h1 class="status-title" id="status-title">Checking connection</h1>
+      <p class="status-detail" id="status-detail">Looking for local server</p>
+      <p class="hint" id="hint">
+        Run <code>npx deeporax-browser-mcp</code>, then open this panel again.
+      </p>
+    </section>
 
-      <label class="pref" for="block-heavy">
-        <span class="pref-copy">
-          <span class="pref-title">Block heavy assets</span>
-          <span class="pref-hint">
-            Skip images, video, and fonts on agent tabs.
-          </span>
+    <div class="controls">
+      <div class="actions">
+        <button class="btn btn-primary" id="reconnect" type="button">
+          Reconnect
+        </button>
+        <button class="btn btn-secondary" id="docs" type="button">
+          Setup docs
+        </button>
+      </div>
+
+      <label class="row" for="block-heavy">
+        <span class="row-copy">
+          <span class="row-title">Block heavy assets</span>
+          <span class="row-hint"
+            >Skip images, video, and fonts on agent tabs so pages load
+            faster.</span
+          >
         </span>
         <span class="switch">
           <input
@@ -553,27 +474,14 @@
             role="switch"
             aria-checked="false"
           />
-          <span class="switch-track" aria-hidden="true"></span>
+          <span class="switch-ui" aria-hidden="true"></span>
         </span>
       </label>
+    </div>
 
-      <div class="actions">
-        <button class="act primary" id="reconnect" type="button">
-          Reconnect
-        </button>
-        <button class="act ghost" id="docs" type="button">Setup</button>
-      </div>
-
-      <div class="help">
-        <p id="help-text">
-          Run <code>npx deeporax-browser-mcp</code>, then reopen this popup.
-        </p>
-      </div>
-    </main>
-
-    <footer>
-      <button class="link" id="site" type="button">deeporax.com</button>
-      <span class="version" id="version">v0.1.0</span>
+    <footer class="foot">
+      <button class="foot-link" id="site" type="button">deeporax.com</button>
+      <span class="ver" id="version">v0.1.0</span>
     </footer>
 
     <script src="popup.js"></script>
