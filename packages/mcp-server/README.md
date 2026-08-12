@@ -95,6 +95,17 @@ Ask your MCP client:
 
 > use browser_status then snapshot my current tab
 
+## Agent loop (receipts)
+
+Mutating write tools (`browser_type`, `browser_clear`, `browser_fill_form`) return a structured **ActionResult** / **BulkResult** receipt:
+
+- `verified` + `before` / `after` — the DOM value was read back (secrets redacted)
+- `next.skipScreenshot` / `next.skipFullSnapshot` — when true, do **not** re-observe just to confirm the write
+- `refs.valid` — whether prior snapshot refs should still work (`true` on same-document verified writes)
+- `next.do` — `continue` | `fix` | `observe` | `wait`
+
+Prefer `browser_fill_form` for multi-field forms. Prefer `browser_snapshot` over `browser_screenshot` for structure. Screenshots are for visual/layout QA only.
+
 ## Docs
 
 Full tool list, overlay behavior, troubleshooting, security notes, and source install:

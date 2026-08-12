@@ -42,6 +42,8 @@ export type TextOutcome = {
   ok: boolean;
   trusted: boolean;
   changed: boolean;
+  /** What the field held before the write (redacted when secret). */
+  before: string;
   /** What the field holds now. */
   value: string;
   /** What it was asked to hold. */
@@ -51,6 +53,8 @@ export type TextOutcome = {
   strategy: string;
   attempts: string[];
   warning?: string;
+  /** True when the control reports aria-invalid or failed native validity. */
+  invalid?: boolean;
 };
 
 /** Time for the page to process a write before reading it back. */
@@ -277,14 +281,18 @@ export async function setText(
   }
 
   const actual = last?.value ?? before.value;
+  const redact = (v: string) =>
+    before.secret ? `[redacted, ${v.length} chars]` : v;
   // Report shape, never contents, when the field holds a credential.
-  const show = (v: string) => (before.secret ? `[redacted, ${v.length} chars]` : JSON.stringify(v));
+  const show = (v: string) =>
+    before.secret ? `[redacted, ${v.length} chars]` : JSON.stringify(v);
   return {
     ok: false,
     trusted: true,
     changed: actual !== before.value,
-    value: before.secret ? `[redacted, ${actual.length} chars]` : actual,
-    expected: before.secret ? `[redacted, ${expected.length} chars]` : expected,
+    before: redact(before.value),
+    value: redact(actual),
+    expected: redact(expected),
     match: "mismatch",
     strategy: "none",
     attempts,
@@ -305,15 +313,20 @@ function succeed(
   expected: string,
   match: Match
 ): TextOutcome {
+  const redact = (v: string) =>
+    after.secret || before.secret ? `[redacted, ${v.length} chars]` : v;
+  const invalid = after.ariaInvalid === "true" || !after.valid;
   const outcome: TextOutcome = {
     ok: true,
     trusted: strategy.trusted,
     changed: after.value !== before.value,
-    value: after.secret ? `[redacted, ${after.value.length} chars]` : after.value,
-    expected: after.secret ? `[redacted, ${expected.length} chars]` : expected,
+    before: redact(before.value),
+    value: redact(after.value),
+    expected: redact(expected),
     match,
     strategy: strategy.name,
     attempts,
+    invalid,
   };
 
   const notes: string[] = [];

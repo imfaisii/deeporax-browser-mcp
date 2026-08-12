@@ -2,6 +2,17 @@ import { DEFAULT_PORT, PROTOCOL_VERSION, isRequest, type BridgeRequest, type Bri
 import { MAIN_WORLD_HOOKS } from "./page-hooks";
 import * as cdp from "./cdp";
 import * as interact from "./interact";
+import {
+  nextNav,
+  pageDelta,
+  readPage,
+  refsAfterNav,
+} from "./action-result";
+import {
+  clearLastAction,
+  coachNoteForObserve,
+  rememberAction,
+} from "./last-action";
 
 const PORT = DEFAULT_PORT;
 const RECONNECT_MS = 2000;
@@ -665,7 +676,12 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
             sid
           );
         }
-        return {
+        clearLastAction(opened.tabId);
+        const navResult = {
+          ok: true,
+          verified: true,
+          trusted: true,
+          action: "navigate",
           tabId: opened.tabId,
           url: fresh.url,
           title: fresh.title,
@@ -675,9 +691,19 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
           openedNewTab: true,
           loadTimedOut: load.timedOut,
           blockHeavyAssets,
+          page: {
+            url: fresh.url ?? "",
+            title: fresh.title ?? "",
+            urlChanged: true,
+          },
+          refs: refsAfterNav(),
+          next: nextNav({ navigated: true, loadTimedOut: load.timedOut }),
         };
+        rememberAction(opened.tabId, navResult);
+        return navResult;
       }
       const id = await resolveTabId(tabIdParam, sid);
+      const pageBefore = await readPage(id);
       // Arm before navigation so the first image wave is already intercepted.
       if (blockHeavyAssets) await applyAssetBlocking(id);
       // Never steal the user's focused tab; agent work runs in the session group.
@@ -692,43 +718,64 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
       // SPAs and redirects often leave the requested URL off the final
       // location. Surface both so the agent can stop retrying a "success"
       // that never left the previous page.
-      return {
+      const navigated =
+        Boolean(tab.url) &&
+        (tab.url === url ||
+          tab.url!.startsWith(url) ||
+          url.startsWith(tab.url!.split("#")[0]!));
+      clearLastAction(id);
+      const page = pageDelta(pageBefore, {
+        url: tab.url ?? "",
+        title: tab.title ?? "",
+      });
+      const navResult = {
+        ok: true,
+        verified: navigated,
+        trusted: true,
+        action: "navigate",
         tabId: id,
         url: tab.url,
         title: tab.title,
         requestedUrl: url,
-        navigated:
-          Boolean(tab.url) &&
-          (tab.url === url ||
-            tab.url!.startsWith(url) ||
-            url.startsWith(tab.url!.split("#")[0]!)),
+        navigated,
         groupId,
         groupTitle: sess.title,
         sessionId: sid,
         loadTimedOut: load.timedOut,
         blockHeavyAssets,
+        page,
+        refs: refsAfterNav(),
+        next: nextNav({ navigated, loadTimedOut: load.timedOut }),
       };
+      rememberAction(id, navResult);
+      return navResult;
     }
 
-    case "back": {
-      const id = await resolveTabId(tabIdParam, sid);
-      await chrome.tabs.goBack(id);
-      await waitForTabComplete(id);
-      return { ok: true, tabId: id, sessionId: sid };
-    }
-
-    case "forward": {
-      const id = await resolveTabId(tabIdParam, sid);
-      await chrome.tabs.goForward(id);
-      await waitForTabComplete(id);
-      return { ok: true, tabId: id, sessionId: sid };
-    }
-
+    case "back":
+    case "forward":
     case "reload": {
       const id = await resolveTabId(tabIdParam, sid);
-      await chrome.tabs.reload(id, { bypassCache: Boolean(params.hard) });
-      await waitForTabComplete(id);
-      return { ok: true, tabId: id, sessionId: sid };
+      const pageBefore = await readPage(id);
+      if (method === "back") await chrome.tabs.goBack(id);
+      else if (method === "forward") await chrome.tabs.goForward(id);
+      else await chrome.tabs.reload(id, { bypassCache: Boolean(params.hard) });
+      const load = await waitForTabComplete(id);
+      const page = pageDelta(pageBefore, await readPage(id));
+      clearLastAction(id);
+      const navResult = {
+        ok: true,
+        verified: true,
+        trusted: true,
+        action: method,
+        tabId: id,
+        sessionId: sid,
+        loadTimedOut: load.timedOut,
+        page,
+        refs: refsAfterNav(),
+        next: nextNav({ navigated: true, loadTimedOut: load.timedOut }),
+      };
+      rememberAction(id, navResult);
+      return navResult;
     }
 
     case "tabs": {
@@ -825,16 +872,19 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
             format: params.format === "png" ? "png" : "jpeg",
             quality: typeof params.quality === "number" ? params.quality : undefined,
           });
+          const coach = coachNoteForObserve(id, "screenshot");
+          const notes = [
+            shot.degraded
+              ? `Compressed to quality ${shot.quality?.toFixed(2)} to stay within a readable size. Pass format:"png" if you need exact pixels.`
+              : "",
+            coach ?? "",
+          ].filter(Boolean);
           return {
             data: shot.data,
             mimeType: shot.format === "png" ? "image/png" : "image/jpeg",
             url: tab.url,
             title: tab.title,
-            ...(shot.degraded
-              ? {
-                  note: `Compressed to quality ${shot.quality?.toFixed(2)} to stay within a readable size. Pass format:"png" if you need exact pixels.`,
-                }
-              : {}),
+            ...(notes.length ? { note: notes.join(" ") } : {}),
           };
         } finally {
           await safeDom(id, "overlay", { action: "restore_after_capture" }).catch(() => {});
@@ -849,11 +899,13 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
           const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
             format: "png",
           });
+          const coach = coachNoteForObserve(id, "screenshot");
           return {
             data: dataUrl.replace(/^data:image\/png;base64,/, ""),
             mimeType: "image/png",
             url: tab.url,
             title: tab.title,
+            ...(coach ? { note: coach } : {}),
           };
         } catch (err) {
           const why = cdp.unavailableReason(id);
@@ -887,34 +939,54 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
       await assertScriptable(id);
       await injectMainHooks(id);
 
+      let outcome: unknown;
       if (!(await cdp.attach(id))) {
         // DevTools is open on the tab, or another debugger owns it. Do the
         // action from the isolated world instead of refusing outright, and say
         // in the result that the events were not trusted.
-        return await syntheticFallback(id, method, params, cdp.unavailableReason(id));
+        outcome = await syntheticFallback(
+          id,
+          method,
+          params,
+          cdp.unavailableReason(id)
+        );
+      } else {
+        switch (method) {
+          case "click":
+            outcome = await interact.click(id, params);
+            break;
+          case "click_xy":
+            outcome = await interact.clickAtPoint(id, params);
+            break;
+          case "type":
+            outcome = await interact.type(id, params);
+            break;
+          case "clear":
+            outcome = await interact.clear(id, params);
+            break;
+          case "press_key":
+            outcome = await interact.pressKey(id, params);
+            break;
+          case "hover":
+            outcome = await interact.hover(id, params);
+            break;
+          case "drag":
+            outcome = await interact.drag(id, params);
+            break;
+          case "select_option":
+            outcome = await interact.selectOption(id, params);
+            break;
+          case "fill_form":
+            outcome = await interact.fillForm(id, params);
+            break;
+          default:
+            throw new Error(`Unhandled interaction: ${method}`);
+        }
       }
-
-      switch (method) {
-        case "click":
-          return await interact.click(id, params);
-        case "click_xy":
-          return await interact.clickAtPoint(id, params);
-        case "type":
-          return await interact.type(id, params);
-        case "clear":
-          return await interact.clear(id, params);
-        case "press_key":
-          return await interact.pressKey(id, params);
-        case "hover":
-          return await interact.hover(id, params);
-        case "drag":
-          return await interact.drag(id, params);
-        case "select_option":
-          return await interact.selectOption(id, params);
-        case "fill_form":
-          return await interact.fillForm(id, params);
+      if (outcome && typeof outcome === "object") {
+        rememberAction(id, outcome as Record<string, unknown>);
       }
-      throw new Error(`Unhandled interaction: ${method}`);
+      return outcome;
     }
 
     // Real page evaluation. MV3 forbids new Function inside the extension,
@@ -967,15 +1039,22 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
           url?: string;
           title?: string;
           patterns?: unknown;
+          refGeneration?: number;
         };
         // Keep the readable tree as the main payload (agents parse text),
         // and attach structured patterns for bulk tools without a second pass.
-        if (typeof snap === "string") return snap;
+        if (typeof snap === "string") {
+          const coach = coachNoteForObserve(id, "snapshot");
+          return coach ? `${snap}\n\n---\n${coach}` : snap;
+        }
+        const coach = coachNoteForObserve(id, "snapshot");
         return {
           text: snap.text,
           url: snap.url,
           title: snap.title,
           patterns: snap.patterns ?? [],
+          refGeneration: snap.refGeneration,
+          ...(coach ? { note: coach } : {}),
         };
       }
       return result;
@@ -1020,21 +1099,27 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
       );
       const matches = (found.matches || []).slice(0, max);
       const stopOnError = params.stopOnError === true;
-      const results: unknown[] = [];
+      const results: Array<Record<string, unknown>> = [];
       let succeeded = 0;
       let failed = 0;
+      const pageBefore = await readPage(id);
 
       const useTrusted = await cdp.attach(id);
 
       for (const m of matches) {
         if (!m.ref) {
-          results.push({ ok: false, name: m.name, error: "match has no ref" });
+          results.push({
+            ok: false,
+            verified: false,
+            target: { name: m.name, role: m.role },
+            error: "match has no ref",
+          });
           failed += 1;
           if (stopOnError) break;
           continue;
         }
         try {
-          let outcome: unknown;
+          let outcome: Record<string, unknown>;
           const p: Record<string, unknown> = {
             ref: m.ref,
             button: params.button,
@@ -1050,51 +1135,90 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
             else if (action === "hover") outcome = await interact.hover(id, p);
             else outcome = await interact.type(id, p);
           } else {
-            outcome = await syntheticFallback(
+            outcome = (await syntheticFallback(
               id,
               action === "type" ? "type" : action === "hover" ? "hover" : "click",
               p,
               cdp.unavailableReason(id)
-            );
+            )) as Record<string, unknown>;
           }
+          const stepOk = outcome.ok !== false;
+          if (!stepOk) failed += 1;
+          else succeeded += 1;
           results.push({
-            ok: true,
-            ref: m.ref,
-            role: m.role,
-            name: m.name,
-            result: outcome,
+            ok: stepOk,
+            verified: Boolean(outcome.verified ?? stepOk),
+            action,
+            target: {
+              ref: m.ref,
+              role: m.role,
+              name: m.name,
+            },
+            before: outcome.before ?? null,
+            after: outcome.after ?? outcome.value ?? null,
+            warning: outcome.warning,
+            // Keep nested result only on failure for debug; successes stay thin.
+            ...(stepOk ? {} : { error: outcome.warning ?? "step failed" }),
           });
-          succeeded += 1;
           // Small gap so React/lists can settle between identical controls.
           await new Promise((r) => setTimeout(r, Number(params.delayMs ?? 40)));
         } catch (err) {
           failed += 1;
           results.push({
             ok: false,
-            ref: m.ref,
-            role: m.role,
-            name: m.name,
+            verified: false,
+            target: { ref: m.ref, role: m.role, name: m.name },
             error: err instanceof Error ? err.message : String(err),
           });
           if (stopOnError) break;
         }
       }
 
-      return {
+      const page = pageDelta(pageBefore, await readPage(id));
+      const total = matches.length;
+      const bulk = {
+        ok: failed === 0,
+        verified: failed === 0,
+        trusted: useTrusted,
+        action: "act_matches",
         query: found.query,
-        action,
         matchCount: found.count,
         attempted: matches.length,
+        count: { total, succeeded, failed },
         succeeded,
         failed,
         exactName: params.exactName !== false,
-        trusted: useTrusted,
         results,
+        page,
+        refs: page.urlChanged
+          ? refsAfterNav()
+          : {
+              valid: "unknown" as const,
+              reason: "bulk actions finished; re-snapshot if next step needs fresh refs",
+            },
+        next:
+          failed > 0
+            ? {
+                do: "fix" as const,
+                skipScreenshot: true,
+                skipFullSnapshot: true,
+                reason: `${failed} of ${total} bulk actions failed. Fix from per-step rows; skip screenshot thrash.`,
+                suggest: ["browser_snapshot"],
+              }
+            : {
+                do: "continue" as const,
+                skipScreenshot: true,
+                skipFullSnapshot: !page.urlChanged,
+                reason:
+                  "Bulk actions finished. Skip screenshot; snapshot only if refs may be stale.",
+              },
         tip:
           found.count > matches.length
             ? `Matched ${found.count}; acted on first ${matches.length}. Raise limit (max 50) to do more.`
             : undefined,
       };
+      rememberAction(id, bulk);
+      return bulk;
     }
 
     case "console": {
@@ -1179,22 +1303,100 @@ async function handleMethod(req: BridgeRequest): Promise<unknown> {
       const actions = (params.actions as Array<{ method: string; params?: Record<string, unknown> }>) || [];
       if (!actions.length) throw new Error("actions[] required");
       if (actions.length > 25) throw new Error("batch limited to 25 actions");
-      const results: unknown[] = [];
+      const tabForBatch =
+        tabIdParam != null
+          ? await resolveTabId(tabIdParam, sid).catch(() => null)
+          : sess.currentTabId;
+      const pageBefore =
+        tabForBatch != null ? await readPage(tabForBatch) : { url: "", title: "" };
+      const results: Array<Record<string, unknown>> = [];
+      let failed = 0;
       for (const action of actions) {
         if (!action?.method) throw new Error("each action needs method");
         if (action.method === "batch") throw new Error("nested batch not allowed");
-        const result = await handleMethod({
-          id: req.id + "_sub",
-          method: action.method,
-          params: {
-            ...action.params,
-            tabId: action.params?.tabId ?? tabIdParam,
-            sessionId: sid,
-          },
-        });
-        results.push({ method: action.method, result });
+        try {
+          const result = await handleMethod({
+            id: req.id + "_sub",
+            method: action.method,
+            params: {
+              ...action.params,
+              tabId: action.params?.tabId ?? tabIdParam,
+              sessionId: sid,
+            },
+          });
+          const stepOk =
+            typeof result === "object" &&
+            result !== null &&
+            "ok" in result
+              ? (result as { ok: unknown }).ok !== false
+              : true;
+          if (!stepOk) failed += 1;
+          // Thin rows: method + ok + key receipt fields when present.
+          if (typeof result === "object" && result !== null) {
+            const r = result as Record<string, unknown>;
+            results.push({
+              method: action.method,
+              ok: stepOk,
+              verified: r.verified,
+              target: r.target,
+              before: r.before ?? null,
+              after: r.after ?? null,
+              warning: r.warning,
+              ...(stepOk ? {} : { error: r.warning ?? r.error }),
+            });
+          } else {
+            results.push({ method: action.method, ok: true, result });
+          }
+        } catch (err) {
+          failed += 1;
+          results.push({
+            method: action.method,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
-      return { results };
+      const endTab =
+        tabIdParam != null
+          ? await resolveTabId(tabIdParam, sid).catch(() => tabForBatch)
+          : sess.currentTabId ?? tabForBatch;
+      const page =
+        endTab != null
+          ? pageDelta(pageBefore, await readPage(endTab))
+          : pageBefore;
+      const total = actions.length;
+      const bulk = {
+        ok: failed === 0,
+        verified: failed === 0,
+        trusted: true,
+        action: "batch",
+        count: { total, succeeded: total - failed, failed },
+        results,
+        page,
+        refs: page.urlChanged
+          ? refsAfterNav()
+          : {
+              valid: "unknown" as const,
+              reason: "batch finished; re-snapshot if next step needs fresh refs",
+            },
+        next:
+          failed > 0
+            ? {
+                do: "fix" as const,
+                skipScreenshot: true,
+                skipFullSnapshot: true,
+                reason: `${failed} of ${total} batch steps failed. Use per-step rows; skip screenshot thrash.`,
+              }
+            : {
+                do: "continue" as const,
+                skipScreenshot: true,
+                skipFullSnapshot: !page.urlChanged,
+                reason:
+                  "Batch finished. Skip screenshot; snapshot only if refs may be stale.",
+              },
+      };
+      if (endTab != null) rememberAction(endTab, bulk);
+      return bulk;
     }
 
     default:
@@ -1237,24 +1439,77 @@ async function syntheticFallback(
         secret?: boolean;
       };
       const text = method === "clear" ? "" : String(params.text ?? "");
-      const wanted = method === "type" && params.append ? String(before.value ?? "") + text : text;
+      const wanted =
+        method === "type" && params.append ? String(before.value ?? "") + text : text;
+      const redact = (v: string) =>
+        before.secret ? `[redacted, ${v.length} chars]` : v;
 
       const set = (await safeDom(tabId, "field_force_set", { ...params, text: wanted })) as {
         value?: string;
       };
       const actual = String(set.value ?? "");
+      const page = {
+        url: (await chrome.tabs.get(tabId).catch(() => null))?.url ?? "",
+        title: (await chrome.tabs.get(tabId).catch(() => null))?.title ?? "",
+      };
+      const target = {
+        ref: typeof params.ref === "string" ? params.ref : undefined,
+        selector: typeof params.selector === "string" ? params.selector : undefined,
+      };
       if (actual !== wanted) {
-        const shown = before.secret
-          ? "the field rejected the value"
-          : `wanted ${JSON.stringify(wanted)}, field holds ${JSON.stringify(actual)}`;
-        throw new Error(`Typing without the debugger did not take: ${shown}. ${degraded.note}`);
+        const warning =
+          `Typing without the debugger did not take. ${degraded.note}`;
+        return {
+          ...degraded,
+          ok: false,
+          verified: false,
+          action: method,
+          target,
+          before: redact(String(before.value ?? "")),
+          after: redact(actual),
+          value: redact(actual),
+          changed: actual !== String(before.value ?? ""),
+          page,
+          refs: {
+            valid: "unknown" as const,
+            reason: "synthetic write path; refs not revalidated",
+          },
+          next: {
+            do: "fix" as const,
+            skipScreenshot: true,
+            skipFullSnapshot: false,
+            reason: warning,
+            suggest: ["browser_snapshot", "browser_type"],
+          },
+          warning,
+        };
       }
       if (params.submit) await safeDom(tabId, "press_key", { key: "Enter" });
       return {
         ...degraded,
         ok: true,
-        ...(before.secret ? {} : { value: actual }),
+        verified: true,
+        action: method,
+        target,
+        before: redact(String(before.value ?? "")),
+        after: redact(actual),
+        value: before.secret ? redact(actual) : actual,
+        changed: actual !== String(before.value ?? ""),
         submitted: Boolean(params.submit),
+        page,
+        refs: {
+          valid: true as const,
+          reason: "same-document verified write; prior snapshot refs should still work",
+        },
+        next: {
+          do: params.submit ? ("observe" as const) : ("continue" as const),
+          skipScreenshot: true,
+          skipFullSnapshot: !params.submit,
+          reason: params.submit
+            ? "Write verified (synthetic) and Enter pressed. Snapshot if DOM may have changed; skip screenshot for the value."
+            : "Value verified (synthetic). Skip screenshot/full snapshot; continue.",
+          ...(params.submit ? { suggest: ["browser_snapshot"] } : {}),
+        },
       };
     }
 
@@ -1273,7 +1528,36 @@ async function syntheticFallback(
   }
 
   const result = (await safeDom(tabId, method, params)) as Record<string, unknown>;
-  return { ...result, ...degraded };
+  const page = {
+    url: (await chrome.tabs.get(tabId).catch(() => null))?.url ?? "",
+    title: (await chrome.tabs.get(tabId).catch(() => null))?.title ?? "",
+  };
+  const target = {
+    ref: typeof params.ref === "string" ? params.ref : undefined,
+    selector: typeof params.selector === "string" ? params.selector : undefined,
+  };
+  // Soft envelope so the outer agent still gets next/refs guidance on the
+  // untrusted path (click/hover/press_key/drag/select/fill_form).
+  return {
+    ...result,
+    ...degraded,
+    ok: result.ok !== false,
+    verified: false,
+    action: method,
+    target: result.target ?? target,
+    page: result.page ?? page,
+    refs: result.refs ?? {
+      valid: "unknown" as const,
+      reason: "synthetic path; refs not revalidated",
+    },
+    next: result.next ?? {
+      do: "continue" as const,
+      skipScreenshot: true,
+      skipFullSnapshot: true,
+      reason:
+        `${method} ran without the debugger (untrusted events). Skip screenshot thrash; re-snapshot only if the next step needs refs.`,
+    },
+  };
 }
 
 async function injectMainHooks(tabId: number): Promise<void> {

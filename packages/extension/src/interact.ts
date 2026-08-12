@@ -11,11 +11,53 @@
  * unconditional `ok: true`.
  */
 import * as cdp from "./cdp";
+import {
+  type ActionResult,
+  type BulkResult,
+  type BulkStepResult,
+  nextBulk,
+  nextClick,
+  nextFailedWrite,
+  nextSoftAction,
+  nextVerifiedWrite,
+  pageDelta,
+  readPage,
+  refsAfterClick,
+  refsAfterWrite,
+  shouldPeek,
+  targetFromParams,
+} from "./action-result";
 import { dom as domCall } from "./dom-channel";
 import { setText } from "./text-entry";
 
 export { useDomChannel } from "./dom-channel";
+export type { ActionResult, BulkResult } from "./action-result";
 
+async function maybePeek(
+  tabId: number,
+  opts: Parameters<typeof shouldPeek>[0]
+): Promise<string | undefined> {
+  if (!shouldPeek(opts)) return undefined;
+  try {
+    const res = (await domCall(tabId, "mini_peek", {
+      form: opts.action === "fill_form" || opts.submitted,
+    })) as { peek?: string };
+    const peek = res?.peek?.trim();
+    return peek || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function peekHasDialog(peek?: string): boolean {
+  return Boolean(peek && /^dialogs:/m.test(peek));
+}
+
+function peekHasAlerts(peek?: string): boolean {
+  return Boolean(peek && (/^alerts:/m.test(peek) || /^invalid:/m.test(peek)));
+}
+
+/** @deprecated Prefer ActionResult — kept as a loose alias for older call sites. */
 export type InteractionOutcome = {
   ok: boolean;
   /** True when the action ran through the trusted CDP path. */
@@ -138,7 +180,8 @@ function clickCountOf(params: Record<string, unknown>): number {
 export async function click(
   tabId: number,
   params: Record<string, unknown>
-): Promise<InteractionOutcome> {
+): Promise<ActionResult> {
+  const pageBefore = await readPage(tabId);
   const origin = await originOf(tabId);
   const target = await resolveTarget(tabId, params);
 
@@ -161,32 +204,61 @@ export async function click(
   );
   await settle();
   const after = await readState(tabId, params);
-
+  const page = pageDelta(pageBefore, await readPage(tabId));
+  const navigated = Boolean(page.urlChanged);
+  const targetGone = after === null;
   const changed = after !== null && after !== before;
-  const outcome: InteractionOutcome = {
+  const targetMeta = targetFromParams(params, target.tag, target.text);
+
+  let warning: string | undefined;
+  if (!changed) {
+    warning = targetGone
+      ? "Element is gone after the click, which usually means the page re-rendered or navigated."
+      : "Click was delivered but no observable state change was detected.";
+  }
+
+  const peek = await maybePeek(tabId, {
+    action: "click",
     ok: true,
-    trusted: true,
     changed,
+    navigated,
+    targetGone,
+    warning: Boolean(warning),
+  });
+  const dialogOpened = peekHasDialog(peek);
+  const hasErrors = peekHasAlerts(peek);
+
+  return {
+    ok: true,
+    verified: changed || navigated || dialogOpened,
+    trusted: true,
+    action: "click",
+    target: targetMeta,
+    changed,
+    before,
+    after,
     tag: target.tag,
     text: target.text,
     point: { x: Math.round(target.x), y: Math.round(target.y) },
+    page,
+    warning,
+    peek,
+    refs: refsAfterClick({ navigated, targetGone, dialogOpened }),
+    next: nextClick({
+      changed,
+      navigated,
+      targetGone,
+      dialogOpened,
+      hasErrors,
+    }),
   };
-
-  if (!changed) {
-    // Navigation and re-render are legitimate reasons for no local change,
-    // so this is a caveat rather than a failure.
-    outcome.warning =
-      after === null
-        ? "Element is gone after the click, which usually means the page re-rendered or navigated."
-        : "Click was delivered but no observable state change was detected. Verify with a fresh snapshot.";
-  }
-  return outcome;
 }
 
 export async function clickAtPoint(
   tabId: number,
   params: Record<string, unknown>
-): Promise<InteractionOutcome> {
+): Promise<ActionResult> {
+  const pageBefore = await readPage(tabId);
   const x = Number(params.x);
   const y = Number(params.y);
   if (!Number.isFinite(x) || !Number.isFinite(y)) {
@@ -218,40 +290,70 @@ export async function clickAtPoint(
     }
   );
   await settle();
+  const page = pageDelta(pageBefore, await readPage(tabId));
+  const navigated = Boolean(page.urlChanged);
+  const peek = await maybePeek(tabId, {
+    action: "click_xy",
+    ok: true,
+    navigated,
+  });
+  const dialogOpened = peekHasDialog(peek);
 
   return {
     ok: true,
+    verified: navigated || dialogOpened,
     trusted: true,
+    action: "click_xy",
+    target: { tag: hit.tag, name: hit.text },
     x,
     y,
     tag: hit.tag,
     text: hit.text,
+    page,
+    peek,
+    refs: refsAfterClick({ navigated, dialogOpened }),
+    next: nextClick({ navigated, dialogOpened, hasErrors: peekHasAlerts(peek) }),
   };
 }
 
 export async function hover(
   tabId: number,
   params: Record<string, unknown>
-): Promise<InteractionOutcome> {
+): Promise<ActionResult> {
+  const pageBefore = await readPage(tabId);
   const target = await resolveTarget(tabId, params);
   await cdp.hoverAt(tabId, { x: target.x, y: target.y });
   await settle(120);
-  return { ok: true, trusted: true, tag: target.tag, text: target.text };
+  const page = pageDelta(pageBefore, await readPage(tabId));
+  return {
+    ok: true,
+    verified: true,
+    trusted: true,
+    action: "hover",
+    target: targetFromParams(params, target.tag, target.text),
+    tag: target.tag,
+    text: target.text,
+    page,
+    refs: { valid: "unknown", reason: "hover does not invalidate refs" },
+    next: nextSoftAction("hover"),
+  };
 }
 
 /**
  * Write text into a field and confirm the field holds it.
  *
  * The write itself lives in text-entry, which escalates through techniques
- * until a read-back agrees with what was asked for. Here we only supply the
- * trusted focus click, since clicking is what makes component libraries set up
- * their own editing state, and a failed write is raised rather than returned
- * so it cannot be mistaken for success.
+ * until a read-back agrees with what was asked for. Here we supply the trusted
+ * focus click and wrap the result as an ActionResult so the outer LLM can skip
+ * screenshot loops when verified is true. Verify mismatches return ok:false
+ * (structured) rather than throwing; hard failures (stale ref, wrong origin)
+ * still throw.
  */
 export async function type(
   tabId: number,
   params: Record<string, unknown>
-): Promise<InteractionOutcome> {
+): Promise<ActionResult> {
+  const pageBefore = await readPage(tabId);
   const origin = await originOf(tabId);
   const expected = params.expectedOrigin ? String(params.expectedOrigin) : "";
   if (expected && origin && expected !== origin) {
@@ -267,9 +369,35 @@ export async function type(
   await settle(80);
 
   const result = await setText(tabId, params);
+  const action = params.text === "" && !params.append ? "clear" : "type";
+  const targetMeta = targetFromParams(params, target.tag, target.text);
 
   if (!result.ok) {
-    throw new Error(result.warning ?? "The field did not accept this value.");
+    const page = pageDelta(pageBefore, await readPage(tabId));
+    const navigated = Boolean(page.urlChanged);
+    const peek = await maybePeek(tabId, {
+      action,
+      ok: false,
+      navigated,
+      warning: true,
+    });
+    return {
+      ...result,
+      ok: false,
+      verified: false,
+      action,
+      target: targetMeta,
+      before: result.before,
+      after: result.value,
+      tag: target.tag,
+      page,
+      peek,
+      refs: refsAfterWrite({ navigated }),
+      next: nextFailedWrite(
+        result.warning ??
+          "The field did not accept this value. Re-check the ref with browser_snapshot; do not screenshot to debug the value."
+      ),
+    };
   }
 
   if (params.submit) {
@@ -277,32 +405,95 @@ export async function type(
     await settle(250);
   }
 
-  return { ...result, tag: target.tag };
+  const page = pageDelta(pageBefore, await readPage(tabId));
+  const navigated = Boolean(page.urlChanged);
+  const submitted = Boolean(params.submit);
+  const invalidHint = Boolean(result.invalid);
+  const peek = await maybePeek(tabId, {
+    action,
+    ok: true,
+    verified: true,
+    changed: result.changed,
+    navigated,
+    submitted,
+    invalidHint,
+  });
+
+  return {
+    ...result,
+    ok: true,
+    verified: true,
+    action,
+    target: targetMeta,
+    before: result.before,
+    after: result.value,
+    tag: target.tag,
+    page,
+    peek,
+    refs: refsAfterWrite({ navigated }),
+    next: nextVerifiedWrite({ submitted, navigated, invalidHint }),
+    ...(invalidHint
+      ? {
+          errors: [
+            {
+              kind: "invalid",
+              text: "Field reports invalid after write",
+              ref: targetMeta.ref,
+            },
+          ],
+        }
+      : {}),
+  };
 }
 
 /** Empty a field, verified the same way as a write. */
 export async function clear(
   tabId: number,
   params: Record<string, unknown>
-): Promise<InteractionOutcome> {
+): Promise<ActionResult> {
   return type(tabId, { ...params, text: "", append: false });
 }
 
 export async function pressKey(
   tabId: number,
   params: Record<string, unknown>
-): Promise<InteractionOutcome> {
+): Promise<ActionResult> {
+  const pageBefore = await readPage(tabId);
   const key = String(params.key ?? "");
   if (!key) throw new Error("key is required");
   await cdp.pressKey(tabId, key);
   await settle(120);
-  return { ok: true, trusted: true, key };
+  const page = pageDelta(pageBefore, await readPage(tabId));
+  const navigated = Boolean(page.urlChanged);
+  const submitish = /^(Enter|Return)$/i.test(key);
+  const peek = await maybePeek(tabId, {
+    action: "press_key",
+    ok: true,
+    navigated,
+    submitted: submitish,
+  });
+  return {
+    ok: true,
+    verified: true,
+    trusted: true,
+    action: "press_key",
+    key,
+    page,
+    peek,
+    refs: navigated
+      ? refsAfterWrite({ navigated: true })
+      : { valid: "unknown", reason: "key press; refs not revalidated" },
+    next: navigated || submitish
+      ? nextClick({ navigated, dialogOpened: peekHasDialog(peek) })
+      : nextSoftAction("press_key"),
+  };
 }
 
 export async function drag(
   tabId: number,
   params: Record<string, unknown>
-): Promise<InteractionOutcome> {
+): Promise<ActionResult> {
+  const pageBefore = await readPage(tabId);
   const from = await resolveTarget(tabId, {
     ref: params.fromRef ?? params.ref,
     selector: params.fromSelector ?? params.selector,
@@ -313,7 +504,21 @@ export async function drag(
   });
   await cdp.dragTo(tabId, { x: from.x, y: from.y }, { x: to.x, y: to.y });
   await settle();
-  return { ok: true, trusted: true, from: from.tag, to: to.tag };
+  const page = pageDelta(pageBefore, await readPage(tabId));
+  return {
+    ok: true,
+    verified: true,
+    trusted: true,
+    action: "drag",
+    from: from.tag,
+    to: to.tag,
+    page,
+    refs: {
+      valid: "unknown",
+      reason: "drag completed; refs not revalidated",
+    },
+    next: nextSoftAction("drag"),
+  };
 }
 
 /**
@@ -324,11 +529,12 @@ export async function drag(
 export async function selectOption(
   tabId: number,
   params: Record<string, unknown>
-): Promise<InteractionOutcome> {
+): Promise<ActionResult> {
   const values = (params.values as string[]) ?? [];
   if (!values.length) throw new Error("values[] is required");
-
+  const pageBefore = await readPage(tabId);
   const target = await resolveTarget(tabId, params);
+  const targetMeta = targetFromParams(params, target.tag, target.text);
 
   if (target.tag === "select") {
     // A native select popup is OS-drawn and cannot be driven by CDP input, so
@@ -345,12 +551,21 @@ export async function selectOption(
           `None of ${JSON.stringify(values)} matched an option in this select.`
       );
     }
+    const page = pageDelta(pageBefore, await readPage(tabId));
     return {
       ok: true,
+      verified: true,
       trusted: false,
+      action: "select_option",
+      target: targetMeta,
       changed: true,
+      before: target.state,
+      after: res.value ?? null,
       value: res.value,
       matched: res.matched,
+      page,
+      refs: refsAfterWrite({ navigated: Boolean(page.urlChanged) }),
+      next: nextVerifiedWrite({ navigated: Boolean(page.urlChanged) }),
     };
   }
 
@@ -374,20 +589,42 @@ export async function selectOption(
 
   await cdp.clickAt(tabId, { x: opt.x!, y: opt.y! });
   await settle();
-  return { ok: true, trusted: true, changed: true, selected: opt.text };
+  const page = pageDelta(pageBefore, await readPage(tabId));
+  const peek = await maybePeek(tabId, {
+    action: "select_option",
+    ok: true,
+    verified: true,
+    changed: true,
+    navigated: Boolean(page.urlChanged),
+  });
+  return {
+    ok: true,
+    verified: true,
+    trusted: true,
+    action: "select_option",
+    target: targetMeta,
+    changed: true,
+    selected: opt.text,
+    after: opt.text ?? null,
+    page,
+    peek,
+    refs: refsAfterWrite({ navigated: Boolean(page.urlChanged) }),
+    next: nextVerifiedWrite({ navigated: Boolean(page.urlChanged) }),
+  };
 }
 
 export async function fillForm(
   tabId: number,
   params: Record<string, unknown>
-): Promise<InteractionOutcome> {
+): Promise<BulkResult> {
   const fields =
     (params.fields as Array<{ ref?: string; selector?: string; value: string }>) ?? [];
   if (!fields.length) throw new Error("fields[] is required");
 
+  const pageBefore = await readPage(tabId);
   // One bad field must not hide the outcome of the others, so each is
   // reported on its own and the run continues.
-  const results: unknown[] = [];
+  const results: BulkStepResult[] = [];
   let failed = 0;
 
   for (const field of fields) {
@@ -398,10 +635,32 @@ export async function fillForm(
         selector: field.selector,
         text: field.value,
       });
+      if (!res.ok) {
+        failed++;
+        results.push({
+          field: where,
+          ok: false,
+          verified: false,
+          action: "type",
+          target: res.target,
+          before: res.before ?? null,
+          after: res.after ?? null,
+          warning: res.warning,
+          error: res.warning,
+          errors: res.errors,
+        });
+        continue;
+      }
       results.push({
         field: where,
         ok: true,
-        value: res.value,
+        verified: true,
+        action: "type",
+        target: res.target,
+        before: res.before ?? null,
+        after: res.after ?? null,
+        // Legacy keys still present for older clients.
+        value: res.after,
         match: res.match,
         warning: res.warning,
       });
@@ -410,6 +669,7 @@ export async function fillForm(
       results.push({
         field: where,
         ok: false,
+        verified: false,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -420,12 +680,35 @@ export async function fillForm(
     await settle(250);
   }
 
-  const outcome: InteractionOutcome = {
+  const page = pageDelta(pageBefore, await readPage(tabId));
+  const navigated = Boolean(page.urlChanged);
+  const submitted = Boolean(params.submit) && failed === 0;
+  const total = fields.length;
+  const succeeded = total - failed;
+  const peek = await maybePeek(tabId, {
+    action: "fill_form",
     ok: failed === 0,
+    verified: failed === 0,
+    navigated,
+    submitted,
+    warning: failed > 0,
+  });
+
+  const outcome: BulkResult = {
+    ok: failed === 0,
+    verified: failed === 0,
     trusted: true,
-    filled: fields.length - failed,
+    action: "fill_form",
+    count: { total, succeeded, failed },
+    // Legacy counts still present for older clients.
+    filled: succeeded,
     failed,
     fields: results,
+    results,
+    page,
+    peek,
+    refs: refsAfterWrite({ navigated }),
+    next: nextBulk({ failed, total, submitted, navigated }),
   };
   if (failed) {
     outcome.warning =
@@ -433,7 +716,7 @@ export async function fillForm(
       (params.submit
         ? "The form was not submitted, so nothing was sent with the wrong values. "
         : "") +
-      "See the per-field results below and fix those before submitting.";
+      "See the per-field results below and fix those before submitting. Skip screenshot; use the receipt.";
   }
   return outcome;
 }

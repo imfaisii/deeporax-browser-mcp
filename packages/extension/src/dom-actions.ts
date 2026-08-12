@@ -24,6 +24,7 @@ declare global {
     __deeporaxRefs?: Map<string, WeakRef<Element>>;
     __deeporaxRefsBack?: WeakMap<Element, string>;
     __deeporaxRefSeq?: number;
+    __deeporaxSnapGen?: number;
     __deeporaxHandle?: (method: string, params: Record<string, unknown>) => unknown;
   }
 }
@@ -241,13 +242,17 @@ export function buildSnapshot(opts: {
   patterns: Array<{ role: string; name: string; count: number; refs: string[] }>;
   url: string;
   title: string;
+  refGeneration: number;
 } {
   const interestingOnly = opts.interestingOnly !== false;
   const refMeta: Record<string, RefEntry> = {};
+  const refGeneration = (window.__deeporaxSnapGen =
+    (window.__deeporaxSnapGen ?? 0) + 1);
 
   const lines: string[] = [];
   lines.push(`- page: ${document.title}`);
   lines.push(`  url: ${location.href}`);
+  lines.push(`  refGeneration: ${refGeneration}`);
 
   const roots = interestingOnly
     ? queryDeep(INTERESTING_SELECTOR).filter(isVisible)
@@ -353,7 +358,118 @@ export function buildSnapshot(opts: {
     patterns,
     url: location.href,
     title: document.title,
+    refGeneration,
   };
+}
+
+/**
+ * Cheap post-action DOM peek for ActionResult.peek.
+ * Priority when trimming: alerts → dialogs → invalid fields → focus → nav.
+ * Hard-capped ~2KB so this never replaces a full snapshot.
+ */
+function buildMiniPeek(params: Record<string, unknown> = {}): string {
+  const CAP = 2000;
+  const sections: string[] = [];
+
+  const clip = (s: string, n: number) =>
+    s.length > n ? `${s.slice(0, n - 1)}…` : s;
+
+  // alerts / status / aria-live / aria-invalid surfaces
+  const alertNodes = queryDeep(
+    '[role="alert"], [role="status"], [aria-live]:not([aria-live="off"]), [aria-invalid="true"], .error, .errors, [class*="error"]'
+  )
+    .filter(isVisible)
+    .slice(0, 8);
+  const alertLines: string[] = [];
+  for (const el of alertNodes) {
+    const role = roleOf(el);
+    const name = nameOf(el) || clip((el.textContent || "").replace(/\s+/g, " ").trim(), 120);
+    if (!name) continue;
+    const ref = refIndex().get(el);
+    alertLines.push(
+      `  - ${role}${name ? ` "${name.replace(/"/g, '\\"')}"` : ""}${ref ? ` [${ref}]` : ""}`
+    );
+    if (alertLines.length >= 5) break;
+  }
+  if (alertLines.length) sections.push("alerts:\n" + alertLines.join("\n"));
+
+  // dialogs
+  const dialogs = queryDeep('[role="dialog"], [role="alertdialog"], dialog[open]')
+    .filter(isVisible)
+    .slice(0, 3);
+  if (dialogs.length) {
+    const dLines = dialogs.map((el) => {
+      const name = nameOf(el) || clip((el.textContent || "").replace(/\s+/g, " ").trim(), 80);
+      const ref = refIndex().get(el);
+      return `  - dialog${name ? ` "${name.replace(/"/g, '\\"')}"` : ""}${ref ? ` [${ref}]` : ""}`;
+    });
+    sections.push("dialogs:\n" + dLines.join("\n"));
+  }
+
+  // invalid form fields (fill_form / submit)
+  if (params.form !== false) {
+    const invalids = queryDeep("input, textarea, select, [aria-invalid='true']")
+      .filter((el) => {
+        if (!isVisible(el)) return false;
+        if (el.getAttribute("aria-invalid") === "true") return true;
+        if (
+          el instanceof HTMLInputElement ||
+          el instanceof HTMLTextAreaElement ||
+          el instanceof HTMLSelectElement
+        ) {
+          return el.validationMessage !== "";
+        }
+        return false;
+      })
+      .slice(0, 5);
+    if (invalids.length) {
+      const iLines = invalids.map((el) => {
+        const name = nameOf(el) || roleOf(el);
+        const ref = refIndex().get(el);
+        const msg =
+          el instanceof HTMLInputElement ||
+          el instanceof HTMLTextAreaElement ||
+          el instanceof HTMLSelectElement
+            ? el.validationMessage
+            : "";
+        return `  - ${name}${ref ? ` [${ref}]` : ""}${msg ? `: ${clip(msg, 80)}` : ""}`;
+      });
+      sections.push("invalid:\n" + iLines.join("\n"));
+    }
+  }
+
+  // focus
+  const ae = document.activeElement;
+  if (ae && ae !== document.body && ae instanceof Element) {
+    const role = roleOf(ae);
+    const name = nameOf(ae);
+    const ref = refIndex().get(ae);
+    let val = "";
+    if (ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement) {
+      val = isSecretField(ae)
+        ? `[redacted, ${ae.value.length} chars]`
+        : clip(ae.value, 80);
+    }
+    sections.push(
+      `focus: ${role}${name ? ` "${name.replace(/"/g, '\\"')}"` : ""}${ref ? ` [${ref}]` : ""}${val ? ` value=${JSON.stringify(val)}` : ""}`
+    );
+  }
+
+  // nav line
+  sections.push(`nav: ${document.title} | ${location.href}`);
+
+  // Priority trim: keep alerts/dialogs/invalid first
+  let out = sections.join("\n");
+  if (out.length <= CAP) return out;
+  // Drop focus then nav if over budget
+  const dropFocus = sections.filter((s) => !s.startsWith("focus:"));
+  out = dropFocus.join("\n");
+  if (out.length <= CAP) return out;
+  const core = sections.filter(
+    (s) => s.startsWith("alerts:") || s.startsWith("dialogs:") || s.startsWith("invalid:")
+  );
+  out = core.join("\n");
+  return out.length > CAP ? out.slice(0, CAP - 1) + "…" : out;
 }
 
 /** Values a click or keystroke is expected to move. */
@@ -608,6 +724,9 @@ export function handleDomMethod(
         interestingOnly: params.interestingOnly as boolean | undefined,
         maxElements: params.maxElements as number | undefined,
       });
+
+    case "mini_peek":
+      return { peek: buildMiniPeek(params), url: location.href, title: document.title };
 
     case "click": {
       const el = resolveEl(params) as HTMLElement;

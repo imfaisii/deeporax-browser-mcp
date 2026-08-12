@@ -14,6 +14,28 @@ function textResult(data: unknown) {
   return { content: [{ type: "text" as const, text }] };
 }
 
+/**
+ * Mutating tools return an ActionResult/BulkResult envelope. When ok is false
+ * the body stays structured JSON so the model can fix from the receipt, but
+ * isError is set so clients surface failure.
+ */
+function actionResult(data: unknown) {
+  const text =
+    typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  const failed =
+    typeof data === "object" &&
+    data !== null &&
+    "ok" in data &&
+    (data as { ok: unknown }).ok === false;
+  if (failed) {
+    return {
+      content: [{ type: "text" as const, text }],
+      isError: true as const,
+    };
+  }
+  return { content: [{ type: "text" as const, text }] };
+}
+
 function errorResult(err: unknown) {
   const message = err instanceof Error ? err.message : String(err);
   return {
@@ -87,7 +109,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_navigate",
-    "Navigate the current (or specified) tab to a URL. Places the tab in the session tab group and renames that group to a short topic from the URL (or groupLabel). Returns the actual url plus navigated/loadTimedOut — if navigated is false, do not assume the page changed.",
+    "Navigate the current (or specified) tab to a URL. Places the tab in the session tab group and renames that group to a short topic from the URL (or groupLabel). Returns ActionResult: refs.valid is false after navigation — take browser_snapshot before ref actions. If navigated is false, do not assume the page changed.",
     {
       url: z.string().url().describe("Absolute URL to open"),
       tabId,
@@ -112,7 +134,7 @@ export function registerTools(server: McpServer): void {
           { url, tabId: id, newTab, groupLabel },
           45_000
         );
-        return textResult(result);
+        return actionResult(result);
       } catch (err) {
         return errorResult(err);
       }
@@ -125,7 +147,7 @@ export function registerTools(server: McpServer): void {
     { tabId },
     async ({ tabId: id }) => {
       try {
-        return textResult(await call("back", { tabId: id }));
+        return actionResult(await call("back", { tabId: id }));
       } catch (err) {
         return errorResult(err);
       }
@@ -138,7 +160,7 @@ export function registerTools(server: McpServer): void {
     { tabId },
     async ({ tabId: id }) => {
       try {
-        return textResult(await call("forward", { tabId: id }));
+        return actionResult(await call("forward", { tabId: id }));
       } catch (err) {
         return errorResult(err);
       }
@@ -154,7 +176,7 @@ export function registerTools(server: McpServer): void {
     },
     async ({ tabId: id, hard }) => {
       try {
-        return textResult(await call("reload", { tabId: id, hard }));
+        return actionResult(await call("reload", { tabId: id, hard }));
       } catch (err) {
         return errorResult(err);
       }
@@ -200,7 +222,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_snapshot",
-    "Capture an accessibility-style DOM snapshot with refs (e1, e2, …). Prefer this over screenshot for interaction. When the page has repeated controls, the snapshot lists REPEATED PATTERNS — use browser_act_matches once instead of N click+snapshot loops.",
+    "Capture an accessibility-style DOM snapshot with refs (e1, e2, …). Prefer this over screenshot for interaction. Do NOT call after a successful browser_type/clear/fill_form when the ActionResult has next.skipFullSnapshot true and refs.valid true — the write is already verified. Re-snapshot after navigation, when refs.valid is false, or when you need new refs. When the page has repeated controls, the snapshot lists REPEATED PATTERNS — use browser_act_matches once instead of N click+snapshot loops.",
     {
       tabId,
       maxElements: z
@@ -247,6 +269,14 @@ export function registerTools(server: McpServer): void {
             ? (result as { patterns: unknown[] }).patterns
             : [];
 
+        const coachNote =
+          typeof result === "object" &&
+          result !== null &&
+          "note" in result &&
+          typeof (result as { note: unknown }).note === "string"
+            ? (result as { note: string }).note
+            : "";
+
         let url: string | undefined;
         let title: string | undefined;
         try {
@@ -268,7 +298,9 @@ export function registerTools(server: McpServer): void {
             bytes: saved.bytes,
             tmpRoot: TMP_ROOT,
             patternCount: patterns.length,
-            note: "Snapshot saved. Read the file, then call browser_clear_tmp or leave it (auto-pruned in 30m).",
+            note:
+              coachNote ||
+              "Snapshot saved. Read the file, then call browser_clear_tmp or leave it (auto-pruned in 30m).",
           });
         }
 
@@ -276,9 +308,10 @@ export function registerTools(server: McpServer): void {
           patterns.length > 0
             ? `\n\n---\npatterns: ${patterns.length} repeated control group(s). Prefer browser_act_matches for bulk click/type instead of one-by-one.`
             : "";
+        const coachHint = coachNote ? `\n\n---\n${coachNote}` : "";
 
         return textResult(
-          `${text}${patternHint}\n\n---\nsaved: ${saved.path} (${saved.bytes} bytes)\ntmp: ${TMP_ROOT} (auto-prune 30m / max 40 files)`
+          `${text}${patternHint}${coachHint}\n\n---\nsaved: ${saved.path} (${saved.bytes} bytes)\ntmp: ${TMP_ROOT} (auto-prune 30m / max 40 files)`
         );
       } catch (err) {
         return errorResult(err);
@@ -288,7 +321,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_screenshot",
-    "Take a screenshot of the tab. PNG is saved under /tmp/deeporax-browser-mcp/screenshots (auto-pruned after 30m) and also returned as image content.",
+    "Take a screenshot of the tab for visual/layout QA only — never to confirm that browser_type/fill_form wrote a value (those tools already verify in the DOM and set next.skipScreenshot). PNG is saved under /tmp/deeporax-browser-mcp/screenshots (auto-pruned after 30m) and also returned as image content.",
     {
       tabId,
       format: z
@@ -420,7 +453,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_click",
-    "Click an element by snapshot ref or CSS selector.",
+    "Click an element by snapshot ref or CSS selector. Returns ActionResult (changed, page, refs.valid, next). Skip screenshot after success; re-snapshot only when next.do is observe or refs.valid is false.",
     {
       ...refOrSelector,
       tabId,
@@ -433,7 +466,7 @@ export function registerTools(server: McpServer): void {
     },
     async (args) => {
       try {
-        return textResult(await call("click", args));
+        return actionResult(await call("click", args));
       } catch (err) {
         return errorResult(err);
       }
@@ -442,7 +475,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_type",
-    "Set the text of an input/textarea/contenteditable by ref or selector. Replaces the existing value unless append is true. The field is read back afterwards and the call fails if it does not hold the requested value, so a success means the value is really there.",
+    "Set the text of an input/textarea/contenteditable by ref or selector. Replaces the existing value unless append is true. Returns an ActionResult: read verified/before/after/next. If next.skipScreenshot and next.skipFullSnapshot are true, do NOT browser_screenshot or full-snapshot just to confirm the value — it is already verified in the DOM. Re-snapshot only when next.do is observe/fix and refs.valid is false, or you need labels for a different field.",
     {
       ...refOrSelector,
       text: z.string().describe("Text to type"),
@@ -462,7 +495,7 @@ export function registerTools(server: McpServer): void {
     },
     async (args) => {
       try {
-        return textResult(await call("type", args));
+        return actionResult(await call("type", args));
       } catch (err) {
         return errorResult(err);
       }
@@ -471,11 +504,11 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_clear",
-    "Empty a text field by ref or selector. The field is read back afterwards, so this fails loudly rather than leaving stale text behind.",
+    "Empty a text field by ref or selector. Returns ActionResult with verified before/after. On success (next.skipScreenshot true) do not screenshot to confirm the clear.",
     { ...refOrSelector, tabId },
     async (args) => {
       try {
-        return textResult(await call("clear", args));
+        return actionResult(await call("clear", args));
       } catch (err) {
         return errorResult(err);
       }
@@ -491,7 +524,7 @@ export function registerTools(server: McpServer): void {
     },
     async ({ key, tabId: id }) => {
       try {
-        return textResult(await call("press_key", { key, tabId: id }));
+        return actionResult(await call("press_key", { key, tabId: id }));
       } catch (err) {
         return errorResult(err);
       }
@@ -504,7 +537,7 @@ export function registerTools(server: McpServer): void {
     { ...refOrSelector, tabId },
     async (args) => {
       try {
-        return textResult(await call("hover", args));
+        return actionResult(await call("hover", args));
       } catch (err) {
         return errorResult(err);
       }
@@ -521,7 +554,7 @@ export function registerTools(server: McpServer): void {
     },
     async (args) => {
       try {
-        return textResult(await call("select_option", args));
+        return actionResult(await call("select_option", args));
       } catch (err) {
         return errorResult(err);
       }
@@ -640,7 +673,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_fill_form",
-    "Fill multiple fields at once. Each field needs ref or selector plus value. Every field is read back after writing, and the per-field results say which ones took the value. If any field fails the form is not submitted.",
+    "Fill multiple fields at once. Each field needs ref or selector plus value. Returns BulkResult: thin per-field rows plus one next/page/refs. Every field is read back; if any fail, ok is false, the form is not submitted, and next.do is fix — use the receipt, not a screenshot loop.",
     {
       tabId,
       fields: z
@@ -658,7 +691,7 @@ export function registerTools(server: McpServer): void {
       try {
         // 15s of headroom per field: each one is written and then verified.
         const budget = 20_000 + args.fields.length * 15_000;
-        return textResult(await call("fill_form", args, budget));
+        return actionResult(await call("fill_form", args, budget));
       } catch (err) {
         return errorResult(err);
       }
@@ -698,7 +731,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_act_matches",
-    "Act on every element matching a text/role pattern in one call (click, hover, or type). Use when the UI repeats the same control (Reply, Follow, checkboxes, identical buttons) instead of screenshot/click loops. Takes a fresh snapshot, finds matches, and runs trusted CDP actions.",
+    "Act on every element matching a text/role pattern in one call (click, hover, or type). Returns BulkResult with thin per-step rows and one next/page/refs — prefer this over screenshot/click loops. Takes a fresh snapshot, finds matches, and runs trusted CDP actions.",
     {
       tabId,
       query: z
@@ -752,7 +785,7 @@ export function registerTools(server: McpServer): void {
     async (args) => {
       try {
         // Bulk work can take a while on long lists.
-        return textResult(await call("act_matches", args, 120_000));
+        return actionResult(await call("act_matches", args, 120_000));
       } catch (err) {
         return errorResult(err);
       }
@@ -775,7 +808,7 @@ export function registerTools(server: McpServer): void {
     },
     async (args) => {
       try {
-        return textResult(await call("click_xy", args));
+        return actionResult(await call("click_xy", args));
       } catch (err) {
         return errorResult(err);
       }
@@ -794,7 +827,7 @@ export function registerTools(server: McpServer): void {
     },
     async (args) => {
       try {
-        return textResult(await call("drag", args));
+        return actionResult(await call("drag", args));
       } catch (err) {
         return errorResult(err);
       }
@@ -977,7 +1010,7 @@ export function registerTools(server: McpServer): void {
 
   server.tool(
     "browser_batch",
-    "Run multiple bridge methods sequentially in one round-trip. Prefer browser_act_matches for repeated same-action clicks; use batch for mixed sequences (type A, click B, snapshot).",
+    "Run multiple bridge methods sequentially in one round-trip. Returns BulkResult (thin per-step rows + one next). Prefer browser_act_matches for repeated same-action clicks; use batch for mixed sequences (type A, click B).",
     {
       tabId,
       actions: z
@@ -992,7 +1025,7 @@ export function registerTools(server: McpServer): void {
     },
     async (args) => {
       try {
-        return textResult(await call("batch", args, 120_000));
+        return actionResult(await call("batch", args, 120_000));
       } catch (err) {
         return errorResult(err);
       }
