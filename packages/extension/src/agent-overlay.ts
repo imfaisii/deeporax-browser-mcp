@@ -329,14 +329,35 @@ export function moveCursorTo(
     return Promise.resolve();
   }
 
+  // Agent tabs run in the background so the user keeps their focus, and Chrome
+  // does not fire requestAnimationFrame there. Animating would never finish and
+  // the caller awaits this before clicking, so jump straight to the target.
+  if (document.visibilityState !== "visible") {
+    s.cursor.style.transform = `translate(${x}px, ${y}px)`;
+    return Promise.resolve();
+  }
+
   const dist = Math.hypot(x - fromX, y - fromY);
   const duration = Math.min(620, Math.max(180, dist * 1.15));
 
   return new Promise((resolve) => {
     const start = performance.now();
     const easeOutCubic = (t: number) => 1 - Math.pow(1 - t, 3);
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      s.cursor.style.transform = `translate(${x}px, ${y}px)`;
+      clearTimeout(guard);
+      resolve();
+    };
+
+    // Backstop for a throttled or hidden renderer: never leave the action
+    // waiting on a frame that may not arrive.
+    const guard = setTimeout(finish, duration + 250);
 
     const step = (now: number) => {
+      if (settled) return;
       const t = Math.min(1, (now - start) / duration);
       const e = easeOutCubic(t);
       const cx = fromX + (x - fromX) * e;
@@ -345,7 +366,7 @@ export function moveCursorTo(
       if (t < 1) {
         requestAnimationFrame(step);
       } else {
-        resolve();
+        finish();
       }
     };
     requestAnimationFrame(step);

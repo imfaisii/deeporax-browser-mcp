@@ -114,7 +114,14 @@ export async function attach(tabId: number): Promise<boolean> {
       attached.add(tabId);
       return true;
     }
-    unavailable.set(tabId, { message, at: Date.now() });
+    // Chrome reports "Cannot access a chrome-extension:// URL of different
+    // extension" for the *browser's* state, not necessarily this tab. Caching
+    // it made the next attach on an ordinary http(s) tab report a stale reason
+    // for a page that was never an extension page, so keep it out of the cache
+    // and let the following call try again.
+    if (!/chrome-extension:\/\//i.test(message)) {
+      unavailable.set(tabId, { message, at: Date.now() });
+    }
     console.debug("[deeporax] debugger attach failed:", message);
     return false;
   }
